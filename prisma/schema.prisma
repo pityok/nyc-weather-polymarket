@@ -30,8 +30,8 @@ model ModelForecast {
   modelId                String
   modelName              String
   confidence             String   // low | medium | high
-  rawResponse            Json
-  probsJson              Json     // 9 диапазонов
+  rawResponse            String   // JSON string
+  probsJson              String   // JSON string (9 диапазонов)
   sumBeforeNormalization Float
   createdAt              DateTime @default(now())
 
@@ -46,7 +46,7 @@ model MarketSnapshot {
   targetDate      DateTime
   snapshotTimeUtc DateTime
   snapshotType    String   // current | fixed_1800_msk
-  probsJson       Json
+  probsJson       String   // JSON string
   source          String
   createdAt       DateTime @default(now())
 
@@ -60,7 +60,7 @@ model Consensus {
   id             String   @id @default(cuid())
   forecastRunId  String
   method         String   // simple | weighted
-  probsJson      Json
+  probsJson      String   // JSON string
   createdAt      DateTime @default(now())
 
   forecastRun ForecastRun @relation(fields: [forecastRunId], references: [id], onDelete: Cascade)
