@@ -52,6 +52,9 @@ npm run db:generate
 - **GET /forecast-runs?limit=20&offset=0** — список run’ов с пагинацией и счетчиками дочерних сущностей.
 - **GET /forecast-runs/summary?runId=...** — summary по edge signals (или по всем run’ам, если `runId` не указан).
 - **GET /forecast-runs/:id** — получить forecast run с дочерними сущностями.
+- **GET /dashboard/snapshot** — агрегированный snapshot для дашборда (`run + summary + meta`, опционально `history`).
+  - query: `runId?`, `includeHistory?` (default `false`), `historyLimit?` (1..50, default `10`)
+  - пример: `/dashboard/snapshot?includeHistory=true&historyLimit=5`
 
 ## Cron / job
 
