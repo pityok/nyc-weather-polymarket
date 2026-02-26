@@ -55,6 +55,11 @@ npm run db:generate
 - **GET /dashboard/snapshot** — агрегированный snapshot для дашборда (`run + summary + meta`, опционально `history`).
   - query: `runId?`, `includeHistory?` (default `false`), `historyLimit?` (1..50, default `10`)
   - пример: `/dashboard/snapshot?includeHistory=true&historyLimit=5`
+- **GET /api/summary?date=YYYY-MM-DD** — forecasts, consensus, market(current/fixed), signals.
+- **GET /api/runs?date=YYYY-MM-DD** — прогоны по дате.
+- **GET /api/market?date=YYYY-MM-DD&type=current|fixed_1800_msk** — market snapshots.
+- **GET /api/signals?date=YYYY-MM-DD** — edge signals по дате.
+- **GET /api/backtest?from=YYYY-MM-DD&to=YYYY-MM-DD** — базовые backtest-метрики.
 
 ## Cron / job
 
