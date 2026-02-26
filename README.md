@@ -47,8 +47,11 @@ npm run db:generate
 
 - **GET /health** — проверка работы сервиса. Ответ: `{ "ok": true }`.
 - **POST /forecast-runs** — создать forecast run вручную по payload.
-- **GET /forecast-runs/:id** — получить forecast run с дочерними сущностями.
 - **POST /forecast-runs/trigger** — вручную триггернуть job-пайплайн. Ответ: `202` + `started/skipped/error`.
+- **GET /forecast-runs/latest** — получить последний forecast run (или `404`, если нет записей).
+- **GET /forecast-runs?limit=20&offset=0** — список run’ов с пагинацией и счетчиками дочерних сущностей.
+- **GET /forecast-runs/summary?runId=...** — summary по edge signals (или по всем run’ам, если `runId` не указан).
+- **GET /forecast-runs/:id** — получить forecast run с дочерними сущностями.
 
 ## Cron / job
 

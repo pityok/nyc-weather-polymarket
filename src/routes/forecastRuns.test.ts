@@ -158,6 +158,52 @@ describe("forecast runs API", () => {
     expect(spy).toHaveBeenCalled();
   });
 
+  it("GET /forecast-runs/latest returns 404 when empty", async () => {
+    const res = await request(app).get("/forecast-runs/latest");
+    expect(res.status).toBe(404);
+  });
+
+  it("GET /forecast-runs/latest returns 200 after create", async () => {
+    const created = await request(app).post("/forecast-runs").send(basePayload);
+    const res = await request(app).get("/forecast-runs/latest");
+
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(created.body.runId);
+  });
+
+  it("GET /forecast-runs supports pagination", async () => {
+    await request(app).post("/forecast-runs").send(basePayload);
+    await request(app)
+      .post("/forecast-runs")
+      .send({
+        ...basePayload,
+        run: { ...basePayload.run, runTimeUtc: "2026-02-27T12:00:00.000Z" },
+      });
+
+    const res = await request(app).get("/forecast-runs?limit=1&offset=0");
+
+    expect(res.status).toBe(200);
+    expect(res.body.limit).toBe(1);
+    expect(res.body.offset).toBe(0);
+    expect(res.body.total).toBe(2);
+    expect(res.body.items.length).toBe(1);
+    expect(res.body.items[0].counts.modelForecasts).toBe(1);
+  });
+
+  it("GET /forecast-runs/summary returns counts/avg/top", async () => {
+    const created = await request(app).post("/forecast-runs").send(basePayload);
+
+    const res = await request(app).get(`/forecast-runs/summary?runId=${created.body.runId}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.totalSignals).toBe(1);
+    expect(res.body.betCount).toBe(1);
+    expect(res.body.noBetCount).toBe(0);
+    expect(res.body.avgEdge).toBeCloseTo(0.2, 5);
+    expect(Array.isArray(res.body.topPositiveEdges)).toBe(true);
+    expect(res.body.topPositiveEdges.length).toBe(1);
+  });
+
   it("safeParse returns fallback for broken json", () => {
     const parsed = safeParse<Record<string, number>>("{broken", { fallback: 1 });
     expect(parsed).toEqual({ fallback: 1 });

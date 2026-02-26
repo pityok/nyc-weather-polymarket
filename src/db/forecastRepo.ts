@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "./client.js";
 import { safeParse, safeStringify } from "../utils/json.js";
+import type { EdgeSignalsSummaryDto, ForecastRunListItemDto } from "../types/forecast.js";
 
 export type Tx = Prisma.TransactionClient;
 
@@ -123,5 +124,114 @@ export async function getForecastRunWithRelations(runId: string, db: DbClient = 
       ...item,
       probsJson: safeParse<Record<string, number>>(item.probsJson, {}),
     })),
+  };
+}
+
+export async function getLatestForecastRun(db: DbClient = prisma) {
+  const run = await db.forecastRun.findFirst({
+    orderBy: { createdAt: "desc" },
+    include: {
+      modelForecasts: true,
+      consensuses: true,
+      edgeSignals: true,
+    },
+  });
+
+  if (!run) return null;
+
+  return {
+    ...run,
+    modelForecasts: run.modelForecasts.map((item) => ({
+      ...item,
+      rawResponse: safeParse<unknown>(item.rawResponse, {}),
+      probsJson: safeParse<Record<string, number>>(item.probsJson, {}),
+    })),
+    consensuses: run.consensuses.map((item) => ({
+      ...item,
+      probsJson: safeParse<Record<string, number>>(item.probsJson, {}),
+    })),
+  };
+}
+
+export async function listForecastRuns(
+  params: { limit: number; offset: number },
+  db: DbClient = prisma,
+): Promise<{ items: ForecastRunListItemDto[]; limit: number; offset: number; total: number }> {
+  const { limit, offset } = params;
+
+  const [rows, total] = await Promise.all([
+    db.forecastRun.findMany({
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      skip: offset,
+      select: {
+        id: true,
+        runTimeUtc: true,
+        runTimeMsk: true,
+        targetDate: true,
+        horizon: true,
+        createdAt: true,
+        _count: {
+          select: {
+            modelForecasts: true,
+            consensuses: true,
+            edgeSignals: true,
+          },
+        },
+      },
+    }),
+    db.forecastRun.count(),
+  ]);
+
+  const items: ForecastRunListItemDto[] = rows.map((row) => ({
+    id: row.id,
+    runTimeUtc: row.runTimeUtc,
+    runTimeMsk: row.runTimeMsk,
+    targetDate: row.targetDate,
+    horizon: row.horizon,
+    createdAt: row.createdAt,
+    counts: {
+      modelForecasts: row._count.modelForecasts,
+      consensuses: row._count.consensuses,
+      edgeSignals: row._count.edgeSignals,
+    },
+  }));
+
+  return { items, limit, offset, total };
+}
+
+export async function getEdgeSignalsSummary(
+  runId?: string,
+  db: DbClient = prisma,
+): Promise<EdgeSignalsSummaryDto> {
+  const rows = await db.edgeSignal.findMany({
+    where: runId ? { forecastRunId: runId } : undefined,
+    select: {
+      recommendation: true,
+      edge: true,
+      rangeKey: true,
+    },
+  });
+
+  const totalSignals = rows.length;
+  const betCount = rows.filter((r) => r.recommendation === "bet").length;
+  const noBetCount = rows.filter((r) => r.recommendation === "no_bet").length;
+  const avgEdge = totalSignals ? rows.reduce((sum, r) => sum + r.edge, 0) / totalSignals : 0;
+
+  const topPositiveEdges = [...rows]
+    .sort((a, b) => b.edge - a.edge)
+    .slice(0, 5)
+    .map((r) => ({
+      rangeKey: r.rangeKey,
+      edge: r.edge,
+      recommendation: r.recommendation,
+    }));
+
+  return {
+    totalSignals,
+    betCount,
+    noBetCount,
+    avgEdge,
+    topPositiveEdges,
   };
 }
