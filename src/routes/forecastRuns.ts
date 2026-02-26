@@ -1,0 +1,33 @@
+import { Router } from "express";
+import { createForecastRunWithData } from "../services/forecastRun.service.js";
+import { getForecastRunWithRelations } from "../db/forecastRepo.js";
+import { createForecastRunPayloadSchema } from "../types/forecastRunPayload.js";
+import { NotFoundError } from "../utils/errorHandler.js";
+
+const router = Router();
+
+router.post("/forecast-runs", async (req, res, next) => {
+  try {
+    const payload = createForecastRunPayloadSchema.parse(req.body);
+    const result = await createForecastRunWithData(payload);
+    res.status(201).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/forecast-runs/:id", async (req, res, next) => {
+  try {
+    const run = await getForecastRunWithRelations(req.params.id);
+
+    if (!run) {
+      throw new NotFoundError("Forecast run not found");
+    }
+
+    res.json(run);
+  } catch (error) {
+    next(error);
+  }
+});
+
+export default router;
