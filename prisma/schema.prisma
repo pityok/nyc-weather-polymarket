@@ -1,0 +1,100 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model ForecastRun {
+  id              String   @id @default(cuid())
+  runTimeUtc      DateTime
+  runTimeMsk      DateTime
+  targetDate      DateTime // только дата
+  horizon         String   // today | tomorrow | day2
+  createdAt       DateTime @default(now())
+
+  modelForecasts ModelForecast[]
+  consensuses    Consensus[]
+  edgeSignals    EdgeSignal[]
+
+  @@index([targetDate])
+  @@index([createdAt])
+  @@index([horizon])
+}
+
+model ModelForecast {
+  id                     String   @id @default(cuid())
+  forecastRunId          String
+  modelId                String
+  modelName              String
+  confidence             String   // low | medium | high
+  rawResponse            Json
+  probsJson              Json     // 9 диапазонов
+  sumBeforeNormalization Float
+  createdAt              DateTime @default(now())
+
+  forecastRun ForecastRun @relation(fields: [forecastRunId], references: [id], onDelete: Cascade)
+
+  @@index([forecastRunId])
+  @@index([createdAt])
+}
+
+model MarketSnapshot {
+  id              String   @id @default(cuid())
+  targetDate      DateTime
+  snapshotTimeUtc DateTime
+  snapshotType    String   // current | fixed_1800_msk
+  probsJson       Json
+  source          String
+  createdAt       DateTime @default(now())
+
+  @@index([targetDate])
+  @@index([snapshotType])
+  @@index([createdAt])
+  @@index([targetDate, snapshotType])
+}
+
+model Consensus {
+  id             String   @id @default(cuid())
+  forecastRunId  String
+  method         String   // simple | weighted
+  probsJson      Json
+  createdAt      DateTime @default(now())
+
+  forecastRun ForecastRun @relation(fields: [forecastRunId], references: [id], onDelete: Cascade)
+
+  @@index([forecastRunId])
+  @@index([createdAt])
+}
+
+model EdgeSignal {
+  id             String   @id @default(cuid())
+  forecastRunId  String
+  targetDate     DateTime
+  rangeKey       String
+  aiProb         Float
+  marketProb     Float
+  edge           Float
+  recommendation String  // bet | no_bet
+  reason         String
+  createdAt      DateTime @default(now())
+
+  forecastRun ForecastRun @relation(fields: [forecastRunId], references: [id], onDelete: Cascade)
+
+  @@index([forecastRunId])
+  @@index([targetDate])
+  @@index([createdAt])
+  @@index([forecastRunId, targetDate])
+}
+
+model ActualOutcome {
+  id              String   @id @default(cuid())
+  targetDate      DateTime @unique
+  winningRangeKey String
+  source          String
+  createdAt       DateTime @default(now())
+
+  @@index([targetDate])
+}
