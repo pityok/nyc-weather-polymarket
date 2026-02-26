@@ -1,5 +1,8 @@
+import { llmAdapters } from "../adapters/index.js";
 import { createForecastRunPayloadSchema, type CreateForecastRunPayload } from "../types/forecastRunPayload.js";
+import { normalizeDistribution, RANGES, type Distribution } from "../types/ranges.js";
 import { createForecastRunWithData } from "./forecastRun.service.js";
+import { computeEdgeRecommendation } from "./edge.service.js";
 
 export type ForecastHorizon = "today" | "tomorrow" | "day2";
 
@@ -26,13 +29,81 @@ function horizonOffset(horizon: ForecastHorizon): number {
   return 2;
 }
 
-export function gatherForecastPayload(
+function averageDistribution(dists: Distribution[]): Distribution {
+  const sums = Object.fromEntries(RANGES.map((k) => [k, 0])) as Distribution;
+  for (const d of dists) {
+    for (const k of RANGES) sums[k] += d[k];
+  }
+  const n = dists.length || 1;
+  return normalizeDistribution(Object.fromEntries(RANGES.map((k) => [k, sums[k] / n])));
+}
+
+export async function gatherForecastPayload(
   horizon: ForecastHorizon = "tomorrow",
   now = new Date(),
-): CreateForecastRunPayload {
+): Promise<CreateForecastRunPayload> {
   const target = new Date(now);
   target.setUTCDate(target.getUTCDate() + horizonOffset(horizon));
   target.setUTCHours(0, 0, 0, 0);
+
+  const settled = await Promise.allSettled(
+    llmAdapters.map((adapter) =>
+      adapter.getForecast({
+        targetDate: target.toISOString().slice(0, 10),
+        location: "NYC LaGuardia",
+      }),
+    ),
+  );
+
+  const ok = settled.filter((s): s is PromiseFulfilledResult<Awaited<ReturnType<(typeof llmAdapters)[0]["getForecast"]>>> => s.status === "fulfilled");
+  const failed = settled.filter((s) => s.status === "rejected");
+
+  if (failed.length) {
+    console.error(`[pipeline] alert: ${failed.length} model(s) failed, using partial consensus`);
+  }
+  if (!ok.length) {
+    throw new Error("All model forecasts failed");
+  }
+
+  const modelForecasts = ok.map((s) => ({
+    modelId: s.value.modelId,
+    modelName: s.value.modelName,
+    confidence: s.value.confidence,
+    rawResponse: s.value.raw,
+    probsJson: s.value.probs,
+    sumBeforeNormalization: s.value.sumBeforeNormalization,
+  }));
+
+  const distList = ok.map((s) => normalizeDistribution(s.value.probs));
+  const simple = averageDistribution(distList);
+  const weighted = averageDistribution(distList); // placeholder: equal weights until weekly weights are used
+
+  const marketDist = normalizeDistribution({
+    le_33: 5,
+    r_34_35: 8,
+    r_36_37: 12,
+    r_38_39: 16,
+    r_40_41: 17,
+    r_42_43: 16,
+    r_44_45: 12,
+    r_46_47: 8,
+    ge_48: 6,
+  });
+
+  const edgeSignals = RANGES.map((rangeKey) => {
+    const aiProb = simple[rangeKey];
+    const marketProb = marketDist[rangeKey];
+    const { edge, recommendation } = computeEdgeRecommendation(aiProb, marketProb);
+    return {
+      targetDate: target,
+      rangeKey,
+      aiProb,
+      marketProb,
+      edge,
+      recommendation,
+      reason: recommendation === "bet" ? "Edge & probability above thresholds" : "Below thresholds",
+    };
+  });
 
   return {
     run: {
@@ -41,38 +112,17 @@ export function gatherForecastPayload(
       targetDate: target,
       horizon,
     },
-    modelForecasts: [
-      {
-        modelId: "mock-model",
-        modelName: "Mock Model",
-        confidence: "medium",
-        rawResponse: { source: "mock" },
-        probsJson: { "20-25": 0.4, "25-30": 0.6 },
-        sumBeforeNormalization: 1,
-      },
-    ],
+    modelForecasts,
     consensuses: [
-      {
-        method: "simple",
-        probsJson: { "20-25": 0.4, "25-30": 0.6 },
-      },
+      { method: "simple", probsJson: simple },
+      { method: "weighted", probsJson: weighted },
     ],
-    edgeSignals: [
-      {
-        targetDate: target,
-        rangeKey: "25-30",
-        aiProb: 0.6,
-        marketProb: 0.45,
-        edge: 0.15,
-        recommendation: "bet",
-        reason: "Mock edge above threshold",
-      },
-    ],
+    edgeSignals,
     marketSnapshot: {
       targetDate: target,
       snapshotTimeUtc: now,
       snapshotType: "current",
-      probsJson: { "20-25": 0.45, "25-30": 0.55 },
+      probsJson: marketDist,
       source: "mock-market",
     },
   };
@@ -82,7 +132,7 @@ export async function runForecastPipeline(horizon: ForecastHorizon = "tomorrow")
   const started = Date.now();
 
   try {
-    const payload = createForecastRunPayloadSchema.parse(gatherForecastPayload(horizon));
+    const payload = createForecastRunPayloadSchema.parse(await gatherForecastPayload(horizon));
     const result = await createForecastRunWithData(payload);
 
     return {

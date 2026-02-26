@@ -6,4 +6,6 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL ?? "file:./dev.db",
   forecastCron: process.env.FORECAST_CRON ?? "*/30 * * * *",
   forecastJobEnabled: process.env.FORECAST_JOB_ENABLED !== "false",
+  edgeThreshold: Number(process.env.EDGE_THRESHOLD ?? 10),
+  minProb: Number(process.env.MIN_PROB ?? 12),
 } as const;

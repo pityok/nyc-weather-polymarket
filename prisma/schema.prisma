@@ -98,3 +98,15 @@ model ActualOutcome {
 
   @@index([targetDate])
 }
+
+model WeeklyModelWeight {
+  id            String   @id @default(cuid())
+  weekStartDate DateTime
+  modelId       String
+  weight        Float
+  metricsJson   String
+  createdAt     DateTime @default(now())
+
+  @@unique([weekStartDate, modelId])
+  @@index([weekStartDate])
+}

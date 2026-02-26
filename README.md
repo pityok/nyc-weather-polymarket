@@ -98,4 +98,48 @@ prisma/
   schema.prisma   — схема БД
 ```
 
-Бизнес-логика пока не добавлена.
+## Архитектура (кратко)
+
+- **adapters/**: LLM adapters (единый контракт)
+- **llm/**: парсинг ответа моделей
+- **market/**: mapper Polymarket -> 9 диапазонов
+- **services/**: pipeline, dashboard snapshot, edge logic, backtest, market snapshots
+- **jobs/**: cron orchestration (MSK timezone)
+- **routes/**: REST API + dashboard snapshot
+- **db/**: Prisma repositories
+- **types/**: Zod-схемы и DTO
+
+## ENV variables
+
+- `PORT`
+- `NODE_ENV`
+- `DATABASE_URL`
+- `FORECAST_JOB_ENABLED`
+- `FORECAST_CRON` (legacy)
+- `EDGE_THRESHOLD` (default 10)
+- `MIN_PROB` (default 12)
+
+## Как добавить новую модель
+
+1. Реализуй `LLMAdapter` в `src/adapters/`
+2. Добавь адаптер в `llmAdapters` массив
+3. Убедись, что ответ соответствует контракту (probs/confidence/reasoningSummary)
+
+## Как интерпретировать сигнал
+
+- `bet` — если `edge >= EDGE_THRESHOLD` и `consensusProb >= MIN_PROB`
+- `no_bet` — иначе
+
+## One-command start
+
+```bash
+./scripts/start.sh
+```
+
+## Docker
+
+```bash
+docker compose up --build
+```
+
+Приложение будет доступно на `http://localhost:3000`, а SQLite хранится в volume `sqlite_data`.

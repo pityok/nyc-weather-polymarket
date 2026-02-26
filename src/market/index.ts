@@ -1,1 +1,1 @@
-// Polymarket integration
+export * from "./mapper.js";

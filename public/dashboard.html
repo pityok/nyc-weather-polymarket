@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NYC Weather Polymarket Dashboard</title>
+  <style>
+    body{font-family:Arial,sans-serif;margin:20px;background:#0b1020;color:#eaf0ff}
+    h1,h2{margin:8px 0}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(280px,1fr));gap:12px}
+    .card{background:#131a2f;border:1px solid #253053;border-radius:10px;padding:12px}
+    table{width:100%;border-collapse:collapse}
+    td,th{padding:6px;border-bottom:1px solid #253053;text-align:left}
+    select,input{background:#0f1630;color:#fff;border:1px solid #33406a;padding:6px;border-radius:6px}
+    .muted{opacity:.8;font-size:12px}
+  </style>
+</head>
+<body>
+  <h1>NYC Weather × Polymarket</h1>
+  <div class="muted" id="updated"></div>
+
+  <div class="card" style="margin:10px 0">
+    <label>Horizon:
+      <select id="horizon"><option>today</option><option selected>tomorrow</option><option>day2</option></select>
+    </label>
+    <label style="margin-left:12px">Date (YYYY-MM-DD):
+      <input id="date" />
+    </label>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Сводная таблица</h2>
+      <table id="summaryTable"></table>
+    </div>
+    <div class="card">
+      <h2>Топ BET сигналов</h2>
+      <table id="betsTable"></table>
+    </div>
+    <div class="card">
+      <h2>Карточки моделей</h2>
+      <div id="models"></div>
+    </div>
+    <div class="card">
+      <h2>История run</h2>
+      <table id="history"></table>
+    </div>
+  </div>
+
+<script>
+function todayYmd(){return new Date().toISOString().slice(0,10)}
+async function load(){
+  const date = document.getElementById('date').value || todayYmd();
+  const summaryRes = await fetch(`/api/summary?date=${date}`);
+  const signalsRes = await fetch(`/api/signals?date=${date}`);
+  const marketCurRes = await fetch(`/api/market?date=${date}&type=current`);
+  const marketFixRes = await fetch(`/api/market?date=${date}&type=fixed_1800_msk`);
+  const snapRes = await fetch(`/dashboard/snapshot?includeHistory=true&historyLimit=10`);
+  if(!summaryRes.ok){return}
+  const summary = await summaryRes.json();
+  const signals = await signalsRes.json();
+  const marketCur = await marketCurRes.json();
+  const marketFix = await marketFixRes.json();
+  const snap = await snapRes.json();
+
+  document.getElementById('updated').innerText = `Last updated UTC: ${new Date().toISOString()} | MSK: ${new Date().toLocaleString('sv-SE',{timeZone:'Europe/Moscow'})}`;
+
+  const cur = marketCur.items?.[0]; const fix = marketFix.items?.[0];
+  document.getElementById('summaryTable').innerHTML = `<tr><th>Источник</th><th>Есть данные</th></tr>
+    <tr><td>Рынок сейчас</td><td>${cur ? 'yes' : 'no'}</td></tr>
+    <tr><td>Рынок 18:00 MSK</td><td>${fix ? 'yes' : 'no'}</td></tr>
+    <tr><td>Consensus AI</td><td>${summary.consensus?.length || 0}</td></tr>
+    <tr><td>Signals</td><td>${summary.signals?.length || 0}</td></tr>`;
+
+  const bets = (signals.items||[]).filter(s=>s.recommendation==='bet').sort((a,b)=>b.edge-a.edge).slice(0,10);
+  document.getElementById('betsTable').innerHTML = `<tr><th>Range</th><th>Edge</th><th>AI</th><th>Market</th></tr>` +
+    bets.map(b=>`<tr><td>${b.rangeKey}</td><td>${b.edge.toFixed(2)}</td><td>${b.aiProb.toFixed(2)}</td><td>${b.marketProb.toFixed(2)}</td></tr>`).join('');
+
+  const forecasts = summary.forecasts || [];
+  const grouped = {};
+  forecasts.forEach(f=>{grouped[f.modelName]=grouped[f.modelName]||0; grouped[f.modelName]++});
+  document.getElementById('models').innerHTML = Object.keys(grouped).map(k=>`<div>${k}: ${grouped[k]} прогноз(ов)</div>`).join('') || 'Нет данных';
+
+  document.getElementById('history').innerHTML = `<tr><th>ID</th><th>Horizon</th><th>Target</th></tr>` +
+    (snap.history||[]).map(r=>`<tr><td>${r.id.slice(0,8)}</td><td>${r.horizon}</td><td>${String(r.targetDate).slice(0,10)}</td></tr>`).join('');
+}
+document.getElementById('date').value=todayYmd();
+load();
+setInterval(load, 60000);
+</script>
+</body>
+</html>

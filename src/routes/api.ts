@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../db/client.js";
+import { runBacktest } from "../services/backtest.service.js";
 import {
   apiSummaryResponseSchema,
   backtestQuerySchema,
@@ -115,25 +116,8 @@ router.get("/api/signals", async (req, res, next) => {
 router.get("/api/backtest", async (req, res, next) => {
   try {
     const { from, to } = backtestQuerySchema.parse(req.query);
-    const fromStart = new Date(`${from}T00:00:00.000Z`);
-    const toEnd = new Date(`${to}T23:59:59.999Z`);
-
-    const signals = await prisma.edgeSignal.findMany({
-      where: { targetDate: { gte: fromStart, lte: toEnd } },
-      orderBy: { targetDate: "asc" },
-    });
-
-    const bets = signals.filter((s) => s.recommendation === "bet");
-    const avgEdge = bets.length ? bets.reduce((sum, s) => sum + s.edge, 0) / bets.length : 0;
-
-    res.json({
-      from,
-      to,
-      totalSignals: signals.length,
-      totalBets: bets.length,
-      avgEdge,
-      roiSimulatedPct: avgEdge,
-    });
+    const result = await runBacktest(from, to);
+    res.json(result);
   } catch (error) {
     next(error);
   }

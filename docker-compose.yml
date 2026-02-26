@@ -1,0 +1,18 @@
+version: "3.9"
+services:
+  app:
+    build: .
+    container_name: nyc-weather-polymarket
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - DATABASE_URL=file:/data/dev.db
+      - FORECAST_JOB_ENABLED=true
+      - EDGE_THRESHOLD=10
+      - MIN_PROB=12
+    volumes:
+      - sqlite_data:/data
+volumes:
+  sqlite_data:
