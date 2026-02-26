@@ -1,8 +1,10 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import app from "../app.js";
 import { prisma } from "../db/client.js";
 import { safeParse } from "../utils/json.js";
+import * as jobs from "../jobs/index.js";
+import * as pipelineService from "../services/forecastPipeline.service.js";
 
 const basePayload = {
   run: {
@@ -48,6 +50,9 @@ const basePayload = {
 };
 
 beforeEach(async () => {
+  vi.restoreAllMocks();
+  jobs.__resetForecastJobLock();
+
   await prisma.edgeSignal.deleteMany();
   await prisma.consensus.deleteMany();
   await prisma.modelForecast.deleteMany();
@@ -93,6 +98,64 @@ describe("forecast runs API", () => {
 
     const missing = await request(app).get("/forecast-runs/nonexistent-id");
     expect(missing.status).toBe(404);
+  });
+
+  it("POST /forecast-runs/trigger returns 202 and runId", async () => {
+    vi.spyOn(jobs, "runForecastIngestionJob").mockResolvedValue({
+      status: "started",
+      runId: "run_mock_1",
+      durationMs: 10,
+      counts: { modelForecasts: 1, consensuses: 1, edgeSignals: 1 },
+    });
+
+    const res = await request(app).post("/forecast-runs/trigger").send({});
+
+    expect(res.status).toBe(202);
+    expect(res.body.status).toBe("started");
+    expect(res.body.runId).toBe("run_mock_1");
+  });
+
+  it("parallel trigger returns started then skipped", async () => {
+    let running = false;
+    vi.spyOn(jobs, "runForecastIngestionJob").mockImplementation(async () => {
+      if (running) {
+        return { status: "skipped", reason: "already running" } as const;
+      }
+
+      running = true;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      running = false;
+      return {
+        status: "started",
+        runId: "run_parallel",
+        durationMs: 50,
+        counts: { modelForecasts: 1, consensuses: 1, edgeSignals: 1 },
+      } as const;
+    });
+
+    const [a, b] = await Promise.all([
+      request(app).post("/forecast-runs/trigger").send({}),
+      request(app).post("/forecast-runs/trigger").send({}),
+    ]);
+
+    const statuses = [a.body.status, b.body.status].sort();
+    expect(statuses).toEqual(["skipped", "started"]);
+  });
+
+  it("runForecastPipeline returns runId via createForecastRunWithData", async () => {
+    const spy = vi
+      .spyOn(pipelineService, "runForecastPipeline")
+      .mockResolvedValue({
+        runId: "run_pipeline",
+        durationMs: 12,
+        counts: { modelForecasts: 1, consensuses: 1, edgeSignals: 1 },
+      });
+
+    const res = await request(app).post("/forecast-runs/trigger").send({});
+
+    expect(res.status).toBe(202);
+    expect(res.body.runId).toBe("run_pipeline");
+    expect(spy).toHaveBeenCalled();
   });
 
   it("safeParse returns fallback for broken json", () => {

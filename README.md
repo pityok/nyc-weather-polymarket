@@ -46,6 +46,18 @@ npm run db:generate
 ## API
 
 - **GET /health** — проверка работы сервиса. Ответ: `{ "ok": true }`.
+- **POST /forecast-runs** — создать forecast run вручную по payload.
+- **GET /forecast-runs/:id** — получить forecast run с дочерними сущностями.
+- **POST /forecast-runs/trigger** — вручную триггернуть job-пайплайн. Ответ: `202` + `started/skipped/error`.
+
+## Cron / job
+
+При старте сервера поднимается scheduler forecast job.
+
+- `FORECAST_JOB_ENABLED=true|false` — включить/выключить планировщик
+- `FORECAST_CRON="*/30 * * * *"` — cron-расписание (по умолчанию раз в 30 минут)
+
+Для ручного запуска без ожидания cron используй `POST /forecast-runs/trigger`.
 
 ## Структура
 
