@@ -58,10 +58,17 @@ npm run db:generate
 
 ## Cron / job
 
-При старте сервера поднимается scheduler forecast job.
+При старте сервера поднимается scheduler (timezone: `Europe/Moscow`).
 
 - `FORECAST_JOB_ENABLED=true|false` — включить/выключить планировщик
-- `FORECAST_CRON="*/30 * * * *"` — cron-расписание (по умолчанию раз в 30 минут)
+- `FORECAST_CRON` — legacy параметр (оставлен для совместимости)
+
+Расписание (MSK):
+- `00:00, 06:00, 12:00, 18:00` — сбор forecast run для `today`, `tomorrow`, `day2`
+- каждые `10 минут` — refresh market snapshots (`current`)
+- `18:00` — сохранение fixed snapshot (`fixed_1800_msk`)
+
+Логи пишутся с timestamp в UTC и MSK.
 
 Для ручного запуска без ожидания cron используй `POST /forecast-runs/trigger`.
 
