@@ -1,5 +1,6 @@
 import type { LLMAdapter, LLMForecastResult } from "../llm/types.js";
 import { normalizeDistribution } from "../types/ranges.js";
+import { makeOpenRouterAdapter } from "./openrouter.js";
 
 function mockResult(modelId: string, modelName: string): LLMForecastResult {
   const probs = normalizeDistribution({
@@ -32,16 +33,17 @@ function makeMockAdapter(modelId: string, modelName: string): LLMAdapter {
   };
 }
 
-export const openaiAdapter = makeMockAdapter("openai/gpt-5.3-codex", "GPT 5.3 Codex");
-export const anthropicAdapter = makeMockAdapter("anthropic/claude-opus-4.1", "Claude Opus 4.1");
-export const googleAdapter = makeMockAdapter("google/gemini-2.5-pro", "Gemini 2.5 Pro");
-export const qwenAdapter = makeMockAdapter("qwen/qwen-2.5-72b-instruct", "Qwen 2.5 72B");
-export const gpt4oMiniAdapter = makeMockAdapter("openai/gpt-4o-mini", "GPT-4o Mini");
+const useReal = Boolean(process.env.OPENROUTER_API_KEY);
 
-export const llmAdapters: LLMAdapter[] = [
-  openaiAdapter,
-  anthropicAdapter,
-  googleAdapter,
-  qwenAdapter,
-  gpt4oMiniAdapter,
+const configured = [
+  { id: "openai/gpt-5.3-codex", name: "GPT 5.3 Codex" },
+  { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet" },
+  { id: "qwen/qwen-2.5-72b-instruct", name: "Qwen 2.5 72B" },
+  { id: "openai/gpt-4o-mini", name: "GPT-4o Mini" },
+  { id: "meta-llama/llama-3.1-8b-instruct", name: "Llama 3.1 8B" },
+  { id: "mistralai/mistral-7b-instruct", name: "Mistral 7B Instruct" },
 ];
+
+export const llmAdapters: LLMAdapter[] = configured.map((m) =>
+  useReal ? makeOpenRouterAdapter(m.id, m.name) : makeMockAdapter(m.id, m.name),
+);

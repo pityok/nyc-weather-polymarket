@@ -1,4 +1,5 @@
 import { llmAdapters } from "../adapters/index.js";
+import { getMarketProbabilities } from "../market/polymarket.js";
 import { createForecastRunPayloadSchema, type CreateForecastRunPayload } from "../types/forecastRunPayload.js";
 import { normalizeDistribution, RANGES, type Distribution } from "../types/ranges.js";
 import { createForecastRunWithData } from "./forecastRun.service.js";
@@ -78,17 +79,8 @@ export async function gatherForecastPayload(
   const simple = averageDistribution(distList);
   const weighted = averageDistribution(distList); // placeholder: equal weights until weekly weights are used
 
-  const marketDist = normalizeDistribution({
-    le_33: 5,
-    r_34_35: 8,
-    r_36_37: 12,
-    r_38_39: 16,
-    r_40_41: 17,
-    r_42_43: 16,
-    r_44_45: 12,
-    r_46_47: 8,
-    ge_48: 6,
-  });
+  const market = await getMarketProbabilities(target.toISOString().slice(0, 10), "current");
+  const marketDist = market.distribution;
 
   const edgeSignals = RANGES.map((rangeKey) => {
     const aiProb = simple[rangeKey];
@@ -123,7 +115,7 @@ export async function gatherForecastPayload(
       snapshotTimeUtc: now,
       snapshotType: "current",
       probsJson: marketDist,
-      source: "mock-market",
+      source: market.source,
     },
   };
 }
