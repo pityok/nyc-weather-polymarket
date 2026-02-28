@@ -58,6 +58,14 @@ export async function runForecastIngestionJob(horizon: ForecastHorizon = "tomorr
   }
 }
 
+async function runForecastBatch() {
+  const horizons: ForecastHorizon[] = ["today", "tomorrow", "day2"];
+  for (const horizon of horizons) {
+    // sequential on purpose: shared lock + predictable order
+    await runForecastIngestionJob(horizon);
+  }
+}
+
 export function startForecastScheduler() {
   if (!config.forecastJobEnabled) {
     logWithTime("forecast-job", "scheduler disabled by FORECAST_JOB_ENABLED=false");
@@ -70,10 +78,7 @@ export function startForecastScheduler() {
   cron.schedule(
     "0 0,6,12,18 * * *",
     () => {
-      const horizons: ForecastHorizon[] = ["today", "tomorrow", "day2"];
-      for (const horizon of horizons) {
-        void runForecastIngestionJob(horizon);
-      }
+      void runForecastBatch();
     },
     { timezone },
   );
