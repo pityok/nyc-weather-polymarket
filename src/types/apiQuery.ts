@@ -32,5 +32,13 @@ export const apiSummaryResponseSchema = z.object({
     current: z.unknown().nullable(),
     fixed_1800_msk: z.unknown().nullable(),
   }),
+  marketMeta: z
+    .object({
+      currentSource: z.unknown().nullable(),
+      fixedSource: z.unknown().nullable(),
+      currentSnapshotTime: z.unknown().nullable(),
+      fixedSnapshotTime: z.unknown().nullable(),
+    })
+    .optional(),
   signals: z.array(z.unknown()),
 });

@@ -86,8 +86,9 @@ router.get("/data.json", async (_req, res, next) => {
     }
 
     for (const snap of snapshots) {
-      // Never expose mock market values in dashboard-facing data
-      if ((snap.source || "").startsWith("mock-")) {
+      // Never expose synthetic/degraded market values in dashboard-facing data
+      const src = snap.source || "";
+      if (src.startsWith("mock-") || src.includes("status=degraded") || src.includes("status=failed")) {
         continue;
       }
 
@@ -151,6 +152,12 @@ router.get("/api/summary", async (req, res, next) => {
       market: {
         current: marketCurrent,
         fixed_1800_msk: marketFixed,
+      },
+      marketMeta: {
+        currentSource: marketCurrent?.source ?? null,
+        fixedSource: marketFixed?.source ?? null,
+        currentSnapshotTime: marketCurrent?.snapshotTimeUtc ?? null,
+        fixedSnapshotTime: marketFixed?.snapshotTimeUtc ?? null,
       },
       signals,
     };

@@ -156,14 +156,24 @@ export async function gatherForecastPayload(
     const aiProb = simple[rangeKey];
     const marketProb = marketDist[rangeKey];
     const { edge, recommendation } = computeEdgeRecommendation(aiProb, marketProb);
+
+    // Hard risk gate: degraded/failed market => force no_bet
+    const gatedRecommendation = market.status === "healthy" ? recommendation : "no_bet";
+    const reason =
+      market.status === "healthy"
+        ? recommendation === "bet"
+          ? "Edge & probability above thresholds"
+          : "Below thresholds"
+        : `Market ${market.status}: ${market.statusReason}`;
+
     return {
       targetDate: target,
       rangeKey,
       aiProb,
       marketProb,
       edge,
-      recommendation,
-      reason: recommendation === "bet" ? "Edge & probability above thresholds" : "Below thresholds",
+      recommendation: gatedRecommendation,
+      reason,
     };
   });
 
@@ -185,7 +195,7 @@ export async function gatherForecastPayload(
       snapshotTimeUtc: now,
       snapshotType: "current",
       probsJson: marketDist,
-      source: market.source,
+      source: `${market.source}|status=${market.status}|reason=${market.statusReason}${market.eventId ? `|eventId=${market.eventId}` : ""}`,
     },
   };
 }
