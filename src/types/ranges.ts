@@ -9,7 +9,10 @@ export const RANGES = [
   "r_42_43",
   "r_44_45",
   "r_46_47",
-  "ge_48",
+  "r_48_49",
+  "r_50_51",
+  "r_52_53",
+  "ge_54",
 ] as const;
 
 export type RangeKey = (typeof RANGES)[number];
@@ -23,7 +26,10 @@ export const RANGE_LABELS: Record<RangeKey, string> = {
   r_42_43: "42-43°F",
   r_44_45: "44-45°F",
   r_46_47: "46-47°F",
-  ge_48: ">=48°F",
+  r_48_49: "48-49°F",
+  r_50_51: "50-51°F",
+  r_52_53: "52-53°F",
+  ge_54: ">=54°F",
 };
 
 export const distributionSchema = z.object(
@@ -42,7 +48,7 @@ export function normalizeDistribution(dist: Partial<Record<RangeKey, number>>): 
   ) as Distribution;
 
   const nsum = Object.values(normalized).reduce((a, b) => a + b, 0);
-  normalized.ge_48 = Number((normalized.ge_48 + (100 - nsum)).toFixed(4));
+  normalized.ge_54 = Number((normalized.ge_54 + (100 - nsum)).toFixed(4));
   return normalized;
 }
 

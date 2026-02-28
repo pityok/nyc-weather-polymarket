@@ -4,15 +4,18 @@ import { makeOpenRouterAdapter } from "./openrouter.js";
 
 function mockResult(modelId: string, modelName: string): LLMForecastResult {
   const probs = normalizeDistribution({
-    le_33: 5,
-    r_34_35: 8,
-    r_36_37: 12,
-    r_38_39: 16,
-    r_40_41: 17,
-    r_42_43: 16,
-    r_44_45: 12,
-    r_46_47: 8,
-    ge_48: 6,
+    le_33: 2,
+    r_34_35: 3,
+    r_36_37: 5,
+    r_38_39: 8,
+    r_40_41: 11,
+    r_42_43: 13,
+    r_44_45: 15,
+    r_46_47: 16,
+    r_48_49: 13,
+    r_50_51: 8,
+    r_52_53: 4,
+    ge_54: 2,
   });
   return {
     modelId,

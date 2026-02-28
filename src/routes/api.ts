@@ -29,7 +29,10 @@ function toLegacyRanges(probs: Record<string, number>) {
     "42-43": probs.r_42_43 ?? probs["42-43"] ?? 0,
     "44-45": probs.r_44_45 ?? probs["44-45"] ?? 0,
     "46-47": probs.r_46_47 ?? probs["46-47"] ?? 0,
-    "48+": probs.ge_48 ?? probs["48+"] ?? 0,
+    "48-49": probs.r_48_49 ?? probs["48-49"] ?? 0,
+    "50-51": probs.r_50_51 ?? probs["50-51"] ?? 0,
+    "52-53": probs.r_52_53 ?? probs["52-53"] ?? 0,
+    "54+": probs.ge_54 ?? probs["54+"] ?? 0,
   };
 }
 

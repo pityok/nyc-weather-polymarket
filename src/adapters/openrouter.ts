@@ -43,7 +43,7 @@ function makePrompt(targetDate: string, location: string) {
   return [
     `Forecast max temperature for ${location} on ${targetDate}.`,
     "Return ONLY JSON with shape:",
-    '{"probs":{"le_33":number,"r_34_35":number,"r_36_37":number,"r_38_39":number,"r_40_41":number,"r_42_43":number,"r_44_45":number,"r_46_47":number,"ge_48":number},"confidence":"low|medium|high","reasoningSummary":"short text"}',
+    '{"probs":{"le_33":number,"r_34_35":number,"r_36_37":number,"r_38_39":number,"r_40_41":number,"r_42_43":number,"r_44_45":number,"r_46_47":number,"r_48_49":number,"r_50_51":number,"r_52_53":number,"ge_54":number},"confidence":"low|medium|high","reasoningSummary":"short text"}',
     "Probabilities are percentages and should sum to 100.",
   ].join("\n");
 }
