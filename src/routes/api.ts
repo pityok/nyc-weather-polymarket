@@ -36,6 +36,20 @@ function toLegacyRanges(probs: Record<string, number>) {
   };
 }
 
+function formatMskDateTime(date: Date) {
+  const parts = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Europe/Moscow",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+  const [d, t] = parts.split(" ");
+  return { date: d, time: t, dateTime: `${d} ${t}` };
+}
+
 router.get("/data.json", async (_req, res, next) => {
   try {
     const [runs, snapshots] = await Promise.all([
@@ -60,17 +74,20 @@ router.get("/data.json", async (_req, res, next) => {
         };
       }
 
-      const timeMsk = new Date(run.runTimeMsk).toISOString().slice(11, 16);
-      if (!summary[d].byTime[timeMsk]) {
-        summary[d].byTime[timeMsk] = { predictions: [] };
+      const msk = formatMskDateTime(run.runTimeUtc);
+      const slotKey = msk.dateTime;
+      if (!summary[d].byTime[slotKey]) {
+        summary[d].byTime[slotKey] = { predictions: [] };
       }
 
       for (const mf of run.modelForecasts) {
         const probs = toLegacyRanges(safeParse<Record<string, number>>(mf.probsJson, {}));
         const most = Object.entries(probs).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "-";
-        summary[d].byTime[timeMsk].predictions.push({
+        summary[d].byTime[slotKey].predictions.push({
           timestamp: run.createdAt.toISOString(),
-          time_moscow: timeMsk,
+          time_moscow: msk.time,
+          request_date_moscow: msk.date,
+          request_datetime_moscow: msk.dateTime,
           targetDate: d,
           model: mf.modelName,
           modelId: mf.modelId,

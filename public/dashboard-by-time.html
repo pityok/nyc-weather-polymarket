@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polymarket Weather Tracker — By Time</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); min-height: 100vh; padding: 20px; }
+        .container { max-width: 1600px; margin: 0 auto; }
+        h1 { text-align: center; color: white; margin-bottom: 10px; }
+        .subtitle { text-align: center; color: rgba(255,255,255,0.8); margin-bottom: 10px; font-size: 14px; }
+        .update-time { text-align: center; color: rgba(255,255,255,0.6); font-size: 12px; margin-bottom: 20px; }
+        .card { background: white; border-radius: 15px; padding: 20px; margin-bottom: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); }
+        .card h2 { color: #1e3c72; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #1e3c72; }
+        
+        .date-tabs, .time-tabs { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+        .date-tab, .time-tab { padding: 10px 20px; background: #e9ecef; border: none; border-radius: 25px; cursor: pointer; font-size: 14px; font-weight: 600; }
+        .date-tab.active, .time-tab.active { background: #1e3c72; color: white; }
+        .time-tab.all { background: #28a745; color: white; }
+        .time-tab.all:not(.active) { background: #e9ecef; color: #333; }
+        
+        .models-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .models-table th { background: #1e3c72; color: white; padding: 10px 6px; text-align: center; position: sticky; top: 0; }
+        .models-table td { padding: 8px 6px; border-bottom: 1px solid #eee; text-align: center; }
+        .models-table tr:hover { background: #f8f9ff; }
+        .model-name { text-align: left !important; font-weight: 600; min-width: 120px; }
+        .time-badge { font-size: 10px; color: #666; }
+        
+        .consensus-row { background: #d4edda !important; font-weight: bold; }
+        .consensus-row td { border-top: 2px solid #28a745; border-bottom: 2px solid #28a745; }
+        .market-row { background: #fff3cd !important; font-weight: bold; }
+        .market-row td { border-top: 2px solid #ffc107; border-bottom: 2px solid #ffc107; }
+        
+        .model-tag { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; margin: 2px; }
+        .claude { background: #d4edda; color: #155724; }
+        .gpt { background: #cce5ff; color: #004085; }
+        .gpt5 { background: #b3d9ff; color: #003d80; }
+        .gemini { background: #f8d7da; color: #721c24; }
+        .llama { background: #fff3cd; color: #856404; }
+        .qwen { background: #e2e3e5; color: #383d41; }
+        
+        .diff-positive { color: #28a745; font-weight: bold; }
+        .diff-negative { color: #dc3545; font-weight: bold; }
+        .diff-neutral { color: #6c757d; }
+        
+        .recommendation { padding: 15px; border-radius: 10px; margin-top: 15px; }
+        .rec-buy { background: #d4edda; border-left: 4px solid #28a745; }
+        .rec-sell { background: #f8d7da; border-left: 4px solid #dc3545; }
+        .rec-hold { background: #fff3cd; border-left: 4px solid #ffc107; }
+        .refresh-btn { background: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 20px; cursor: pointer; font-size: 14px; display: block; margin: 0 auto 20px; }
+        .empty-state { text-align: center; padding: 40px; color: #999; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌡️ Polymarket Weather Tracker</h1>
+        <p class="subtitle">Переключение по времени сбора данных</p>
+        <p class="update-time" id="updateTime">Загрузка...</p>
+        
+        <button class="refresh-btn" onclick="loadData()">🔄 Обновить данные</button>
+        
+        <div id="content">
+            <div class="card">
+                <div class="loading" style="text-align: center; padding: 40px;">Загрузка...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const RANGES = ["33-", "34-35", "36-37", "38-39", "40-41", "42-43", "44-45", "46-47", "48+"];
+        const RANGES_FULL = {"33-": "≤33°F", "34-35": "34-35°F", "36-37": "36-37°F", "38-39": "38-39°F", "40-41": "40-41°F", "42-43": "42-43°F", "44-45": "44-45°F", "46-47": "46-47°F", "48+": "≥48°F"};
+        const MODEL_CLASSES = {'Claude Sonnet 4.6': 'claude', 'Claude 3.5 Haiku': 'claude', 'GPT-5.2': 'gpt5', 'GPT-4o mini': 'gpt', 'Gemini 3.1 Pro': 'gemini', 'Llama 3.1 70B': 'llama', 'Qwen 2.5 72B': 'qwen'};
+        
+        let currentData = null, selectedDate = null, selectedTime = 'all';
+        
+        async function loadData() {
+            try {
+                const res = await fetch('data.json?t=' + Date.now());
+                if (!res.ok) throw new Error('Failed to load');
+                currentData = await res.json();
+                selectedDate = Object.keys(currentData.summary).sort().find(d => d >= '2026-02-25') || Object.keys(currentData.summary).sort()[0];
+                document.getElementById('updateTime').textContent = 'Обновлено: ' + new Date(currentData.lastUpdated).toLocaleString('ru-RU');
+                render();
+            } catch (err) {
+                document.getElementById('content').innerHTML = `<div class="card"><div style="color: #dc3545; text-align: center;">Ошибка: ${err.message}</div></div>`;
+            }
+        }
+        
+        function selectDate(date) { selectedDate = date; selectedTime = 'all'; render(); }
+        function selectTime(time) { selectedTime = time; render(); }
+        
+        function normalizeRange(range) {
+            if (range.includes('33')) return '33-';
+            if (range.includes('34-35')) return '34-35';
+            if (range.includes('36-37')) return '36-37';
+            if (range.includes('38-39')) return '38-39';
+            if (range.includes('40-41')) return '40-41';
+            if (range.includes('42-43')) return '42-43';
+            if (range.includes('44-45')) return '44-45';
+            if (range.includes('46-47')) return '46-47';
+            if (range.includes('48') || range.includes('higher')) return '48+';
+            return range;
+        }
+        
+        function getProb(probs, range) {
+            if (!probs) return 0;
+            for (let key of Object.keys(probs)) {
+                if (normalizeRange(key) === range) return probs[key];
+            }
+            return 0;
+        }
+        
+        function render() {
+            if (!currentData || !selectedDate) return;
+            
+            const dateData = currentData.summary[selectedDate];
+            const marketData = dateData.marketData;
+            
+            // Get available times
+            const availableTimes = Object.keys(dateData.byTime).sort();
+            
+            // Filter predictions by selected time
+            let filteredPredictions = [];
+            if (selectedTime === 'all') {
+                Object.entries(dateData.byTime).forEach(([time, data]) => {
+                    data.predictions
+                        .filter(p => p.targetDate === selectedDate)
+                        .forEach(p => filteredPredictions.push({...p, time}));
+                });
+            } else {
+                const timeData = dateData.byTime[selectedTime];
+                if (timeData) {
+                    timeData.predictions
+                        .filter(p => p.targetDate === selectedDate)
+                        .forEach(p => filteredPredictions.push({...p, time: selectedTime}));
+                }
+            }
+            
+            // Sort by model name
+            filteredPredictions.sort((a, b) => a.model.localeCompare(b.model));
+            
+            // Calculate consensus for filtered data
+            const consensus = selectedTime === 'all' ? dateData.latestConsensus : 
+                calculateConsensus(filteredPredictions);
+            
+            // Get market data - both historical for selected time AND current
+            const currentMarketData = dateData.marketData;
+            const marketDataByTime = dateData.marketByTime || {};
+            const historicalMarket = selectedTime !== 'all' ? marketDataByTime[selectedTime] : null;
+            
+            // Build rows - ORDER: Historical Market -> Current Market -> Consensus -> Diff -> Models
+            const rows = [];
+            
+            // Historical Market row (if specific time selected)
+            if (historicalMarket) {
+                const marketCells = RANGES.map(r => `<td>${getProb(historicalMarket, r) || 0}%</td>`).join('');
+                const top = Object.entries(historicalMarket).sort((a,b) => b[1]-a[1])[0];
+                rows.push(`
+                    <tr class="market-row" style="background: #fff3cd;">
+                        <td class="model-name">🏛️ РЫНОК НА ${selectedTime}</td>
+                        ${marketCells}
+                        <td><strong>${top[0]}°F</strong></td>
+                    </tr>
+                `);
+            }
+            
+            // Current Market row
+            if (currentMarketData) {
+                const marketCells = RANGES.map(r => `<td>${getProb(currentMarketData, r) || 0}%</td>`).join('');
+                const top = Object.entries(currentMarketData).sort((a,b) => b[1]-a[1])[0];
+                rows.push(`
+                    <tr class="market-row">
+                        <td class="model-name">🏛️ РЫНОК СЕЙЧАС</td>
+                        ${marketCells}
+                        <td><strong>${top[0]}°F</strong></td>
+                    </tr>
+                `);
+            }
+            
+            // Market at 18:00 (frozen snapshot) - always show if available and not already showing as historical
+            const marketAt18 = marketDataByTime["18:00"];
+            if (marketAt18 && selectedTime !== '18:00') {
+                const marketCells = RANGES.map(r => `<td>${getProb(marketAt18, r) || 0}%</td>`).join('');
+                const top = Object.entries(marketAt18).sort((a,b) => b[1]-a[1])[0];
+                rows.push(`
+                    <tr class="market-row" style="background: #ffe082;">
+                        <td class="model-name">🏛️ РЫНОК В 18:00 <span style="font-size: 10px; color: #666;">(заморожено)</span></td>
+                        ${marketCells}
+                        <td><strong>${top[0]}°F</strong></td>
+                    </tr>
+                `);
+            }
+            
+            // Consensus row SECOND
+            if (consensus) {
+                const consensusCells = RANGES.map(r => `<td><strong>${getProb(consensus, r) || 0}%</strong></td>`).join('');
+                const top = Object.entries(consensus).sort((a,b) => b[1]-a[1])[0];
+                rows.push(`
+                    <tr class="consensus-row">
+                        <td class="model-name">
+                            🎯 ${selectedTime === 'all' ? 'ОБЩИЙ КОНСЕНСУС' : 'КОНСЕНСУС ' + selectedTime}
+                            <span class="time-badge">Взвешенный</span>
+                        </td>
+                        ${consensusCells}
+                        <td><strong>${top[0]}°F</strong></td>
+                    </tr>
+                `);
+            }
+            
+            // Diff row THIRD - compare vs CURRENT market
+            if (currentMarketData && consensus) {
+                const diffCells = RANGES.map(r => {
+                    const diff = (getProb(consensus, r) || 0) - (getProb(currentMarketData, r) || 0);
+                    const cls = diff > 5 ? 'diff-positive' : diff < -5 ? 'diff-negative' : 'diff-neutral';
+                    return `<td class="${cls}">${diff > 0 ? '+' : ''}${diff}%</td>`;
+                }).join('');
+                rows.push(`
+                    <tr style="background: #f8f9fa; font-style: italic;">
+                        <td class="model-name">📊 Разница (наши - рынок сейчас)</td>
+                        ${diffCells}
+                        <td>-</td>
+                    </tr>
+                `);
+            }
+            
+            // Models LAST
+            filteredPredictions.forEach(p => {
+                const cls = MODEL_CLASSES[p.model] || 'claude';
+                const cells = RANGES.map(r => `<td>${getProb(p.probabilities || p.probs, r) || '-'}%</td>`).join('');
+                rows.push(`
+                    <tr>
+                        <td class="model-name">
+                            <span class="model-tag ${cls}">${p.model}</span>
+                            <span class="time-badge">${p.time} ${p.source === 'perplexity' ? '👤' : '🤖'}</span>
+                        </td>
+                        ${cells}
+                        <td><strong>${p.mostLikely || '-'}</strong></td>
+                    </tr>
+                `);
+            });
+            
+            // Build tabs
+            const dates = Object.keys(currentData.summary).sort();
+            const dateTabs = dates.map(d => `
+                <button class="date-tab ${d === selectedDate ? 'active' : ''}" onclick="selectDate('${d}')">${d}</button>
+            `).join('');
+            
+            const timeTabs = `
+                <button class="time-tab all ${selectedTime === 'all' ? 'active' : ''}" onclick="selectTime('all')">📊 Все время</button>
+                ${availableTimes.map(t => `
+                    <button class="time-tab ${t === selectedTime ? 'active' : ''}" onclick="selectTime('${t}')">🕐 ${t}</button>
+                `).join('')}
+            `;
+            
+            // Recommendation
+            let recHtml = '';
+            if (marketData && consensus) {
+                const diffs = RANGES.map(r => ({
+                    range: r,
+                    diff: (consensus[r] || 0) - (marketData[r] || 0),
+                    our: consensus[r] || 0,
+                    market: marketData[r] || 0
+                })).sort((a,b) => Math.abs(b.diff) - Math.abs(a.diff));
+                
+                const best = diffs[0];
+                if (best.diff > 8) {
+                    recHtml = `<div class="recommendation rec-buy"><h3>🟢 СТАВИТЬ: ${RANGES_FULL[best.range]}</h3><p>Наши: ${best.our}% | Рынок: ${best.market}% | Edge: +${best.diff}%</p></div>`;
+                } else if (best.diff < -10) {
+                    recHtml = `<div class="recommendation rec-sell"><h3>🔴 ИЗБЕГАТЬ: ${RANGES_FULL[best.range]}</h3><p>Рынок переоценил на ${Math.abs(best.diff)}%</p></div>`;
+                } else {
+                    recHtml = `<div class="recommendation rec-hold"><h3>🟡 ВОЗДЕРЖАТЬСЯ</h3><p>Максимальный edge: ${Math.abs(best.diff)}%</p></div>`;
+                }
+            }
+            
+            const headerCells = RANGES.map(r => `<th>${RANGES_FULL[r]}</th>`).join('');
+            
+            document.getElementById('content').innerHTML = `
+                <div class="date-tabs">${dateTabs}</div>
+                
+                <div class="card">
+                    <h3>🕐 Выбор времени сбора данных:</h3>
+                    <div class="time-tabs">${timeTabs}</div>
+                    <p style="color: #666; font-size: 12px;">
+                        🤖 = Авто (cron) | 👤 = Perplexity (ты вручную)
+                        ${selectedTime !== 'all' ? ' | Показаны данные только за ' + selectedTime : ' | Показаны все данные за день'}
+                    </p>
+                </div>
+                
+                <div class="card">
+                    <h2>📋 ${selectedDate} — ${selectedTime === 'all' ? 'Все данные' : 'Данные за ' + selectedTime}</h2>
+                    
+                    ${filteredPredictions.length === 0 ? `
+                        <div class="empty-state">
+                            Нет данных для выбранного времени.<br>
+                            ${selectedTime === 'all' ? 'Подождите следующего сбора данных.' : 'Попробуйте выбрать другое время или "Все время".'}
+                        </div>
+                    ` : `
+                        <div style="overflow-x: auto;">
+                            <table class="models-table">
+                                <thead><tr><th>Модель / Время</th>${headerCells}<th>Топ</th></tr></thead>
+                                <tbody>${rows.join('')}</tbody>
+                            </table>
+                        </div>
+                    `}
+                    
+                    ${recHtml}
+                </div>
+                
+                <div class="card">
+                    <h2>📊 Сводка</h2>
+                    <p><strong>Прогнозов в таблице:</strong> ${filteredPredictions.length}</p>
+                    <p><strong>Времена сбора:</strong> ${availableTimes.join(', ') || 'Нет данных'}</p>
+                    ${marketData ? `
+                        <p><strong>🏛️ Рынок обновлён:</strong> ${new Date(dateData.marketUpdated || Date.now()).toLocaleString('ru-RU')}</p>
+                    ` : ''}
+                </div>
+            `;
+        }
+        
+        function calculateConsensus(predictions) {
+            const weights = {'Claude Sonnet 4.6': 3, 'GPT-5.2': 3, 'Gemini 3.1 Pro': 3, 'Claude 3.5 Haiku': 1, 'GPT-4o mini': 1, 'Llama 3.1 70B': 1, 'Qwen 2.5 72B': 1};
+            const consensus = {};
+            RANGES.forEach(r => {
+                let sum = 0, w = 0;
+                predictions.forEach(p => {
+                    const val = getProb(p.probabilities || p.probs, r);
+                    if (val > 0) {
+                        const weight = weights[p.model] || 1;
+                        sum += val * weight;
+                        w += weight;
+                    }
+                });
+                consensus[r] = w > 0 ? Math.round(sum / w) : 0;
+            });
+            return consensus;
+        }
+        
+        loadData();
+        setInterval(loadData, 5 * 60 * 1000);
+    </script>
+</body>
+</html>
