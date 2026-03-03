@@ -18,6 +18,15 @@ describe("city registry (P4 smoke)", () => {
     expect(london?.timezone).toBe("Europe/London");
   });
 
+  it("Ankara is in the registry", () => {
+    const ankara = getCity("ankara");
+    expect(ankara).not.toBeNull();
+    expect(ankara?.cityId).toBe("ankara");
+    expect(ankara?.timezone).toBe("Europe/Istanbul");
+    expect(typeof ankara?.coords.lat).toBe("number");
+    expect(typeof ankara?.coords.lon).toBe("number");
+  });
+
   it("returns null for unknown city", () => {
     expect(getCity("mars")).toBeNull();
   });

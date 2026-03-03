@@ -26,6 +26,13 @@ export const CITY_REGISTRY: Record<string, CityConfig> = {
     coords: { lat: 51.477, lon: -0.461 },
     timezone: "Europe/London",
   },
+  ankara: {
+    cityId: "ankara",
+    displayName: "Ankara (Esenboga)",
+    coords: { lat: 40.1281, lon: 32.9951 },
+    timezone: "Europe/Istanbul",
+    marketResolverConfig: { defaultSlugPrefix: "highest-temperature-in-ankara" },
+  },
 };
 
 export function getCity(cityId: string): CityConfig | null {

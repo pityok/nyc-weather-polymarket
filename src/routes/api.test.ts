@@ -192,3 +192,13 @@ describe("/api endpoints with cityId", () => {
     expect(london.body.models.some((m: any) => m.modelId === "model-london")).toBe(true);
   });
 });
+
+
+describe("/api cities registry", () => {
+  it("returns ankara in cities list", async () => {
+    const res = await request(app).get("/api/cities");
+    expect(res.status).toBe(200);
+    const ids = (res.body.cities || []).map((c: any) => c.cityId);
+    expect(ids).toContain("ankara");
+  });
+});
