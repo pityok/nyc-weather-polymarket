@@ -27,7 +27,7 @@
 
   <div class="card" style="margin:10px 0">
     <label>Дата:
-      <select id="dateSelect"></select>
+      <select id="dateSelect" onchange="load()"></select>
     </label>
     <label style="margin-left:12px">City:
       <select id="citySelect"><option value="nyc">NYC</option><option value="london">London</option><option value="ankara">Ankara</option></select>
@@ -175,26 +175,30 @@ function pickMarketAtRequest(marketItems, runTimeUtc){
 }
 
 async function load(){
-  await ensureDateOptions();
-  const date = document.getElementById('dateSelect').value || todayYmd();
-  const cityId = document.getElementById('citySelect').value || 'nyc';
+  try {
+    await ensureDateOptions();
+    const date = document.getElementById('dateSelect').value || todayYmd();
+    const cityId = document.getElementById('citySelect').value || 'nyc';
+    const t = Date.now();
 
-  const [summaryRes, signalsRes, marketCurRes, marketFixRes, marketNativeRes, runsRes, snapRes, evolutionRes, qualityRes] = await Promise.all([
-    fetch(`/api/summary?date=${date}&cityId=${cityId}`),
-    fetch(`/api/signals?date=${date}&cityId=${cityId}`),
-    fetch(`/api/market?date=${date}&type=current&cityId=${cityId}`),
-    fetch(`/api/market?date=${date}&type=fixed_1800_msk&cityId=${cityId}`),
-    fetch(`/api/polymarket-native?date=${date}&cityId=${cityId}`),
-    fetch(`/api/runs?date=${date}&cityId=${cityId}`),
-    fetch(`/dashboard/snapshot?includeHistory=true&historyLimit=10&cityId=${cityId}`),
-    fetch(`/api/evolution?date=${date}&cityId=${cityId}`),
-    fetch(`/api/model-quality?windowDays=7&cityId=${cityId}`),
-  ]);
+    document.getElementById('updated').innerText = `Загрузка данных: ${date} / ${cityId}...`;
 
-  if(!summaryRes.ok){
-    document.getElementById('updated').innerText = `Ошибка загрузки summary (${summaryRes.status})`;
-    return;
-  }
+    const [summaryRes, signalsRes, marketCurRes, marketFixRes, marketNativeRes, runsRes, snapRes, evolutionRes, qualityRes] = await Promise.all([
+      fetch(`/api/summary?date=${date}&cityId=${cityId}&_t=${t}`),
+      fetch(`/api/signals?date=${date}&cityId=${cityId}&_t=${t}`),
+      fetch(`/api/market?date=${date}&type=current&cityId=${cityId}&_t=${t}`),
+      fetch(`/api/market?date=${date}&type=fixed_1800_msk&cityId=${cityId}&_t=${t}`),
+      fetch(`/api/polymarket-native?date=${date}&cityId=${cityId}&_t=${t}`),
+      fetch(`/api/runs?date=${date}&cityId=${cityId}&_t=${t}`),
+      fetch(`/dashboard/snapshot?includeHistory=true&historyLimit=10&cityId=${cityId}&_t=${t}`),
+      fetch(`/api/evolution?date=${date}&cityId=${cityId}&_t=${t}`),
+      fetch(`/api/model-quality?windowDays=7&cityId=${cityId}&_t=${t}`),
+    ]);
+
+    if(!summaryRes.ok){
+      document.getElementById('updated').innerText = `Ошибка загрузки summary (${summaryRes.status})`;
+      return;
+    }
 
   const summary = await summaryRes.json();
   const signals = signalsRes.ok ? await signalsRes.json() : {items:[]};
@@ -332,6 +336,9 @@ async function load(){
   // History
   document.getElementById('history').innerHTML = `<tr><th>ID</th><th>Horizon</th><th>Target</th><th>Created</th></tr>` +
     ((snap.history||[]).length ? (snap.history||[]).map(r=>`<tr><td>${String(r.id).slice(0,8)}</td><td>${r.horizon||''}</td><td>${String(r.targetDate).slice(0,10)}</td><td>${String(r.createdAt||'').slice(0,19).replace('T',' ')}</td></tr>`).join('') : '<tr><td colspan="4" class="muted">Нет истории</td></tr>');
+  } catch (e) {
+    document.getElementById('updated').innerText = `Ошибка обновления: ${e?.message || e}`;
+  }
 }
 
 document.getElementById('reloadBtn').addEventListener('click', load);
