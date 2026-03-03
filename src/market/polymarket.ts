@@ -23,7 +23,7 @@ function neutralDistribution(): Distribution {
 export async function getMarketProbabilities(
   targetDate: string,
   snapshotType: SnapshotType,
-  _cityId = "nyc",
+  cityId = "nyc",
 ): Promise<MarketResult> {
   const useReal = process.env.POLYMARKET_USE_REAL === "true";
 
@@ -40,7 +40,7 @@ export async function getMarketProbabilities(
 
   // ID-first: require a stable market entry in the registry.
   // No substring/slug guessing — if no entry, return degraded immediately.
-  const entry = getMarketEntry(targetDate);
+  const entry = getMarketEntry(targetDate, cityId);
   if (!entry) {
     return {
       distribution: neutralDistribution(),
@@ -48,7 +48,7 @@ export async function getMarketProbabilities(
       eventId: null,
       snapshotType,
       status: "degraded",
-      statusReason: `no_market_id_registered_for_date:${targetDate}`,
+      statusReason: `no_market_id_registered_for_date_city:${targetDate}:${cityId}`,
     };
   }
 
