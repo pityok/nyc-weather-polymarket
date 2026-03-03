@@ -33,7 +33,7 @@
 
   <div class="grid">
     <div class="card" style="grid-column:1 / -1">
-      <h2>Матрица вероятностей (%): модели + рынок + консенсус (12 bins)</h2>
+      <h2>Матрица вероятностей (%): модели + рынок (12 bins)</h2>
       <div class="muted" id="probMeta"></div>
       <div class="scroll-x">
         <table id="probMatrix"></table>
@@ -178,13 +178,6 @@ async function load(){
   const latestRunId = latestRun?.id || null;
   const latestRunUtc = latestRun?.runTimeUtc || null;
 
-  const latestConsensusRaw = (summary.consensus || [])
-    .filter(c => !latestRunId || c.forecastRunId === latestRunId)
-    .sort((a,b)=> (a.createdAt < b.createdAt ? 1 : -1));
-  const weighted = latestConsensusRaw.find(c => c.method === 'weighted');
-  const simple = latestConsensusRaw.find(c => c.method === 'simple');
-  const consensus = weighted || simple || latestConsensusRaw[0] || null;
-
   const runById = new Map((runs.items || []).map(r => [r.id, r]));
   const allForecastsChrono = (summary.forecasts || [])
     .map(f => ({ ...f, __run: runById.get(f.forecastRunId) || null }))
@@ -228,11 +221,6 @@ async function load(){
     const p = toRangeMap(probsRaw);
     const cols = RANGE_COLS.map(([k])=>`<td>${fmt(p[k])}</td>`).join('');
     rows.push(`<tr><td><strong>${label}</strong><div class="muted">${meta}</div></td>${cols}<td><strong>${topRange(p)}</strong></td></tr>`);
-  }
-
-  if(consensus) {
-    const cRun = runById.get(consensus.forecastRunId);
-    row(`Consensus (${consensus.method||'unknown'})`, consensus.probsJson, `latest run: ${cRun?.runTimeUtc || consensus.createdAt || ''}`);
   }
 
   if(marketAtRequest) {
