@@ -5,6 +5,9 @@ import { createForecastRunPayloadSchema, type CreateForecastRunPayload } from ".
 import { normalizeDistribution, RANGES, type Distribution, type RangeKey } from "../types/ranges.js";
 import { createForecastRunWithData } from "./forecastRun.service.js";
 import { computeEdgeRecommendation } from "./edge.service.js";
+import { computeModelWeights7d } from "./modelWeights.service.js";
+import { fetchWithRetry, RETRY_OPEN_METEO } from "../utils/fetchWithRetry.js";
+import type { LLMForecastResult } from "../llm/types.js";
 
 export type ForecastHorizon = "today" | "tomorrow" | "day2";
 
@@ -38,6 +41,30 @@ function averageDistribution(dists: Distribution[]): Distribution {
   }
   const n = dists.length || 1;
   return normalizeDistribution(Object.fromEntries(RANGES.map((k) => [k, sums[k] / n])));
+}
+
+/**
+ * Weighted distribution using per-model quality weights.
+ * Falls back to equal-weight average if a model has no weight entry.
+ */
+export function weightedDistribution(
+  models: Array<{ modelId: string; dist: Distribution }>,
+  weights: Map<string, number>,
+): Distribution {
+  const sums = Object.fromEntries(RANGES.map((k) => [k, 0])) as Distribution;
+  let totalWeight = 0;
+
+  for (const { modelId, dist } of models) {
+    const w = weights.get(modelId) ?? 0;
+    for (const k of RANGES) sums[k] += dist[k] * w;
+    totalWeight += w;
+  }
+
+  if (totalWeight <= 0) {
+    return averageDistribution(models.map((m) => m.dist));
+  }
+
+  return normalizeDistribution(Object.fromEntries(RANGES.map((k) => [k, sums[k] / totalWeight])));
 }
 
 function rangeCenterF(k: RangeKey): number {
@@ -79,8 +106,7 @@ async function getBaselineDistribution(targetDate: string): Promise<Distribution
   url.searchParams.set("start_date", targetDate);
   url.searchParams.set("end_date", targetDate);
 
-  const res = await fetch(url.toString());
-  if (!res.ok) throw new Error(`Open-Meteo forecast failed: HTTP ${res.status}`);
+  const res = await fetchWithRetry(url.toString(), {}, RETRY_OPEN_METEO);
   const data = (await res.json()) as { daily?: { temperature_2m_max?: number[] } };
   const maxF = data.daily?.temperature_2m_max?.[0];
   if (typeof maxF !== "number") throw new Error("Open-Meteo missing temperature_2m_max");
@@ -99,11 +125,13 @@ export async function gatherForecastPayload(
   let modelForecasts: CreateForecastRunPayload["modelForecasts"] = [];
   let simple: Distribution;
   let weighted: Distribution;
+  let weightedMeta: string;
 
   if (config.baselineOnly) {
     const baseline = await getBaselineDistribution(targetDate);
     simple = baseline;
     weighted = baseline;
+    weightedMeta = "baseline_only";
     modelForecasts = [
       {
         modelId: "baseline/open-meteo",
@@ -125,7 +153,9 @@ export async function gatherForecastPayload(
       ),
     );
 
-    const ok = settled.filter((s): s is PromiseFulfilledResult<any> => s.status === "fulfilled");
+    const ok = settled.filter(
+      (s): s is PromiseFulfilledResult<LLMForecastResult> => s.status === "fulfilled",
+    );
     const failed = settled.filter((s) => s.status === "rejected");
 
     if (failed.length) {
@@ -144,9 +174,25 @@ export async function gatherForecastPayload(
       sumBeforeNormalization: s.value.sumBeforeNormalization,
     }));
 
-    const distList = ok.map((s) => normalizeDistribution(s.value.probs));
+    const modelDists = ok.map((s) => ({
+      modelId: s.value.modelId,
+      dist: normalizeDistribution(s.value.probs),
+    }));
+    const distList = modelDists.map((m) => m.dist);
     simple = averageDistribution(distList);
-    weighted = averageDistribution(distList);
+
+    // Real weighted consensus: use 7d quality metrics (hit-rate + brier + calibration).
+    // Falls back to simple average with explicit reason when data is insufficient.
+    const weightsResult = await computeModelWeights7d(now);
+    if (weightsResult.ok) {
+      weighted = weightedDistribution(modelDists, weightsResult.weights);
+      weightedMeta = `7d_quality_weights:models=${weightsResult.models.map((m) => `${m.modelId}:${m.weight.toFixed(4)}`).join(",")}`;
+      console.info(`[pipeline] weighted consensus via 7d quality weights: ${weightedMeta}`);
+    } else {
+      weighted = simple;
+      weightedMeta = `fallback_equal_weights:reason=${weightsResult.reason}`;
+      console.warn(`[pipeline] weighted consensus fallback: ${weightsResult.reason}`);
+    }
   }
 
   const market = await getMarketProbabilities(targetDate, "current");

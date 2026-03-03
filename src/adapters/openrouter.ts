@@ -1,5 +1,6 @@
 import { parseModelDistribution } from "../llm/parser.js";
 import type { LLMAdapter, LLMForecastResult } from "../llm/types.js";
+import { fetchWithRetry, RETRY_OPENROUTER } from "../utils/fetchWithRetry.js";
 
 const BASE_URL = process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
 
@@ -7,28 +8,22 @@ async function callOpenRouter(model: string, prompt: string): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
 
-  const res = await fetch(`${BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
+  const res = await fetchWithRetry(
+    `${BASE_URL}/chat/completions`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        messages: [{ role: "user", content: prompt }],
+      }),
     },
-    body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      messages: [
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-    }),
-  });
-
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`OpenRouter ${model} error: ${res.status} ${txt}`);
-  }
+    RETRY_OPENROUTER,
+  );
 
   const data = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
