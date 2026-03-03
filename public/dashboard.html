@@ -216,7 +216,7 @@ async function load(){
     .sort((a,b)=> {
       const at = asTs(a.__run?.runTimeUtc || a.createdAt);
       const bt = asTs(b.__run?.runTimeUtc || b.createdAt);
-      if (at !== bt) return at - bt;
+      if (at !== bt) return bt - at;
       return String(a.modelName || a.modelId || '').localeCompare(String(b.modelName || b.modelId || ''));
     });
 
