@@ -9,7 +9,10 @@ import {
   runsQuerySchema,
   signalsQuerySchema,
   apiSummaryQuerySchema,
+  evolutionQuerySchema,
+  modelQualityQuerySchema,
 } from "../types/apiQuery.js";
+import { CITY_REGISTRY } from "../config/cities.js";
 
 const router = Router();
 
@@ -60,7 +63,7 @@ router.get("/data.json", async (_req, res, next) => {
       prisma.marketSnapshot.findMany({ orderBy: { snapshotTimeUtc: "asc" } }),
     ]);
 
-    const summary: Record<string, any> = {};
+    const summary: Record<string, unknown> = {};
 
     for (const run of runs) {
       const d = run.targetDate.toISOString().slice(0, 10);
@@ -74,16 +77,24 @@ router.get("/data.json", async (_req, res, next) => {
         };
       }
 
+      const daySummary = summary[d] as {
+        totalPredictions: number;
+        byTime: Record<string, { predictions: unknown[] }>;
+        marketData: unknown;
+        marketByTime: Record<string, unknown>;
+        marketUpdated: string | null;
+      };
+
       const msk = formatMskDateTime(run.runTimeUtc);
       const slotKey = msk.dateTime;
-      if (!summary[d].byTime[slotKey]) {
-        summary[d].byTime[slotKey] = { predictions: [] };
+      if (!daySummary.byTime[slotKey]) {
+        daySummary.byTime[slotKey] = { predictions: [] };
       }
 
       for (const mf of run.modelForecasts) {
         const probs = toLegacyRanges(safeParse<Record<string, number>>(mf.probsJson, {}));
         const most = Object.entries(probs).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "-";
-        summary[d].byTime[slotKey].predictions.push({
+        daySummary.byTime[slotKey].predictions.push({
           timestamp: run.createdAt.toISOString(),
           time_moscow: msk.time,
           request_date_moscow: msk.date,
@@ -98,7 +109,7 @@ router.get("/data.json", async (_req, res, next) => {
           factors: [],
           comment: "",
         });
-        summary[d].totalPredictions += 1;
+        daySummary.totalPredictions += 1;
       }
     }
 
@@ -120,17 +131,25 @@ router.get("/data.json", async (_req, res, next) => {
         };
       }
 
+      const daySummary = summary[d] as {
+        totalPredictions: number;
+        byTime: Record<string, { predictions: unknown[] }>;
+        marketData: unknown;
+        marketByTime: Record<string, unknown>;
+        marketUpdated: string | null;
+      };
+
       const probs = toLegacyRanges(safeParse<Record<string, number>>(snap.probsJson, {}));
       const t = snap.snapshotTimeUtc.toISOString().slice(11, 16);
-      summary[d].marketByTime[t] = probs;
+      daySummary.marketByTime[t] = probs;
 
       if (snap.snapshotType === "current") {
-        summary[d].marketData = probs;
-        summary[d].marketUpdated = snap.snapshotTimeUtc.toISOString();
+        daySummary.marketData = probs;
+        daySummary.marketUpdated = snap.snapshotTimeUtc.toISOString();
       }
 
       if (snap.snapshotType === "fixed_1800_msk") {
-        summary[d].marketByTime["18:00"] = probs;
+        daySummary.marketByTime["18:00"] = probs;
       }
     }
 
@@ -249,6 +268,115 @@ router.get("/api/backtest", async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+/**
+ * P2: Evolution endpoint — returns forecast versions for a target date,
+ * ordered chronologically (T-2 → T-1 → T0).
+ */
+router.get("/api/evolution", async (req, res, next) => {
+  try {
+    const { date } = evolutionQuerySchema.parse(req.query);
+    const { start, end } = dayBounds(date);
+
+    const runs = await prisma.forecastRun.findMany({
+      where: { targetDate: { gte: start, lte: end } },
+      include: { consensuses: true },
+      orderBy: { createdAt: "asc" },
+    });
+
+    const versions = runs.map((run, idx) => {
+      const weighted = run.consensuses.find((c) => c.method === "weighted");
+      const simple = run.consensuses.find((c) => c.method === "simple");
+      const probs = safeParse<Record<string, number>>((weighted ?? simple)?.probsJson ?? "{}", {});
+      const topEntry = Object.entries(probs).sort((a, b) => b[1] - a[1])[0];
+      const topRange = topEntry?.[0] ?? null;
+      const msk = formatMskDateTime(run.runTimeUtc);
+
+      return {
+        versionIndex: idx,
+        runId: run.id,
+        requestDatetimeUtc: run.runTimeUtc.toISOString(),
+        requestDatetimeMsk: msk.dateTime,
+        horizon: run.horizon,
+        topRange,
+        probs,
+        method: weighted ? "weighted" : simple ? "simple" : "unknown",
+      };
+    });
+
+    // Delta between consecutive versions (topRange changes and probability shifts)
+    const deltas = versions.slice(1).map((v, i) => {
+      const prev = versions[i];
+      const probDelta: Record<string, number> = {};
+      for (const k of Object.keys(v.probs)) {
+        const cur = v.probs[k] ?? 0;
+        const old = prev.probs[k] ?? 0;
+        if (Math.abs(cur - old) > 0.001) {
+          probDelta[k] = Number((cur - old).toFixed(4));
+        }
+      }
+      return {
+        fromRunId: prev.runId,
+        toRunId: v.runId,
+        topRangeChanged: prev.topRange !== v.topRange,
+        topRangePrev: prev.topRange,
+        topRangeCur: v.topRange,
+        probDelta,
+      };
+    });
+
+    res.json({ date, versions, deltas });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * P3: Model quality scoreboard — per-model 7d quality metrics and weights.
+ */
+router.get("/api/model-quality", async (req, res, next) => {
+  try {
+    const { windowDays } = modelQualityQuerySchema.parse(req.query);
+    const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+    // Get the Monday of the week containing `since`
+    const d = new Date(since);
+    const day = d.getUTCDay();
+    d.setUTCDate(d.getUTCDate() - ((day + 6) % 7));
+    d.setUTCHours(0, 0, 0, 0);
+
+    const weights = await prisma.weeklyModelWeight.findMany({
+      where: { weekStartDate: { gte: d } },
+      orderBy: [{ weekStartDate: "desc" }, { weight: "desc" }],
+    });
+
+    const models = weights.map((w) => ({
+      modelId: w.modelId,
+      weekStartDate: w.weekStartDate.toISOString().slice(0, 10),
+      weight: w.weight,
+      metrics: safeParse<Record<string, unknown>>(w.metricsJson, {}),
+    }));
+
+    res.json({
+      windowDays,
+      since: since.toISOString().slice(0, 10),
+      models,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * P4: City registry — returns available cities.
+ */
+router.get("/api/cities", (_req, res) => {
+  const cities = Object.values(CITY_REGISTRY).map(({ cityId, displayName, timezone }) => ({
+    cityId,
+    displayName,
+    timezone,
+  }));
+  res.json({ cities });
 });
 
 export default router;

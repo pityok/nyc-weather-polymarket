@@ -7,6 +7,8 @@ import { createForecastRunWithData } from "./forecastRun.service.js";
 import { computeEdgeRecommendation } from "./edge.service.js";
 import { computeModelWeights7d } from "./modelWeights.service.js";
 import { fetchWithRetry, RETRY_OPEN_METEO } from "../utils/fetchWithRetry.js";
+import { targetDateForHorizon, parseDateUTC } from "../utils/timeNY.js";
+import { getDefaultCity } from "../config/cities.js";
 import type { LLMForecastResult } from "../llm/types.js";
 
 export type ForecastHorizon = "today" | "tomorrow" | "day2";
@@ -27,12 +29,6 @@ export type PipelineFailure = {
 };
 
 export type PipelineResult = PipelineSuccess | PipelineFailure;
-
-function horizonOffset(horizon: ForecastHorizon): number {
-  if (horizon === "today") return 0;
-  if (horizon === "tomorrow") return 1;
-  return 2;
-}
 
 function averageDistribution(dists: Distribution[]): Distribution {
   const sums = Object.fromEntries(RANGES.map((k) => [k, 0])) as Distribution;
@@ -96,13 +92,14 @@ function gaussianDistFromMax(maxF: number, sigma = 3.0): Distribution {
   return normalizeDistribution(raw);
 }
 
-async function getBaselineDistribution(targetDate: string): Promise<Distribution> {
+async function getBaselineDistribution(targetDate: string, cityId = "nyc"): Promise<Distribution> {
+  const city = getDefaultCity(cityId);
   const url = new URL("https://api.open-meteo.com/v1/forecast");
-  url.searchParams.set("latitude", "40.7769");
-  url.searchParams.set("longitude", "-73.8740");
+  url.searchParams.set("latitude", String(city.coords.lat));
+  url.searchParams.set("longitude", String(city.coords.lon));
   url.searchParams.set("daily", "temperature_2m_max");
   url.searchParams.set("temperature_unit", "fahrenheit");
-  url.searchParams.set("timezone", "America/New_York");
+  url.searchParams.set("timezone", city.timezone);
   url.searchParams.set("start_date", targetDate);
   url.searchParams.set("end_date", targetDate);
 
@@ -117,21 +114,25 @@ export async function gatherForecastPayload(
   horizon: ForecastHorizon = "tomorrow",
   now = new Date(),
 ): Promise<CreateForecastRunPayload> {
-  const target = new Date(now);
-  target.setUTCDate(target.getUTCDate() + horizonOffset(horizon));
-  target.setUTCHours(0, 0, 0, 0);
-  const targetDate = target.toISOString().slice(0, 10);
+  // Use NY timezone as source of truth for targetDate/horizon (fixes UTC-based bug)
+  const targetDate = targetDateForHorizon(horizon, now);
+  const target = parseDateUTC(targetDate);
 
   let modelForecasts: CreateForecastRunPayload["modelForecasts"] = [];
   let simple: Distribution;
   let weighted: Distribution;
-  let weightedMeta: string;
+  type WeightsResult = Awaited<ReturnType<typeof computeModelWeights7d>>;
+  let weightsResult: WeightsResult;
 
   if (config.baselineOnly) {
-    const baseline = await getBaselineDistribution(targetDate);
+    // Baseline mode: Open-Meteo only, no LLM. Run weights + market in parallel.
+    const [baseline, wr] = await Promise.all([
+      getBaselineDistribution(targetDate),
+      computeModelWeights7d(now),
+    ]);
+    weightsResult = wr;
     simple = baseline;
     weighted = baseline;
-    weightedMeta = "baseline_only";
     modelForecasts = [
       {
         modelId: "baseline/open-meteo",
@@ -143,15 +144,20 @@ export async function gatherForecastPayload(
       },
     ];
   } else {
-    const settled = await Promise.allSettled(
-      llmAdapters.map((adapter) =>
-        adapter.getForecast({
-          targetDate,
-          location: "NYC LaGuardia",
-          context: { note: "Do not use market probabilities" },
-        }),
+    // LLM mode: compute weights and forecasts in parallel
+    const [settled, wr] = await Promise.all([
+      Promise.allSettled(
+        llmAdapters.map((adapter) =>
+          adapter.getForecast({
+            targetDate,
+            location: "NYC LaGuardia",
+            context: { note: "Do not use market probabilities" },
+          }),
+        ),
       ),
-    );
+      computeModelWeights7d(now),
+    ]);
+    weightsResult = wr;
 
     const ok = settled.filter(
       (s): s is PromiseFulfilledResult<LLMForecastResult> => s.status === "fulfilled",
@@ -183,14 +189,12 @@ export async function gatherForecastPayload(
 
     // Real weighted consensus: use 7d quality metrics (hit-rate + brier + calibration).
     // Falls back to simple average with explicit reason when data is insufficient.
-    const weightsResult = await computeModelWeights7d(now);
     if (weightsResult.ok) {
       weighted = weightedDistribution(modelDists, weightsResult.weights);
-      weightedMeta = `7d_quality_weights:models=${weightsResult.models.map((m) => `${m.modelId}:${m.weight.toFixed(4)}`).join(",")}`;
-      console.info(`[pipeline] weighted consensus via 7d quality weights: ${weightedMeta}`);
+      const weightLog = weightsResult.models.map((m) => `${m.modelId}:${m.weight.toFixed(4)}`).join(",");
+      console.info(`[pipeline] weighted consensus via 7d quality weights: ${weightLog}`);
     } else {
       weighted = simple;
-      weightedMeta = `fallback_equal_weights:reason=${weightsResult.reason}`;
       console.warn(`[pipeline] weighted consensus fallback: ${weightsResult.reason}`);
     }
   }
@@ -198,19 +202,32 @@ export async function gatherForecastPayload(
   const market = await getMarketProbabilities(targetDate, "current");
   const marketDist = market.distribution;
 
+  // P3 quality gate: if QUALITY_GATE_REQUIRED=true and quality data insufficient → no_bet
+  const qualityGatePassed = !config.qualityGateRequired || weightsResult.ok;
+  const qualityGateReason = weightsResult.ok ? null : weightsResult.reason;
+
   const edgeSignals = RANGES.map((rangeKey) => {
     const aiProb = simple[rangeKey];
     const marketProb = marketDist[rangeKey];
     const { edge, recommendation } = computeEdgeRecommendation(aiProb, marketProb);
 
-    // Hard risk gate: degraded/failed market => force no_bet
-    const gatedRecommendation = market.status === "healthy" ? recommendation : "no_bet";
+    // Gate 1: degraded/failed market => force no_bet
+    // Gate 2: quality gate (P3) — only active if QUALITY_GATE_REQUIRED=true
+    const gatedRecommendation =
+      market.status !== "healthy"
+        ? "no_bet"
+        : !qualityGatePassed
+          ? "no_bet"
+          : recommendation;
+
     const reason =
-      market.status === "healthy"
-        ? recommendation === "bet"
-          ? "Edge & probability above thresholds"
-          : "Below thresholds"
-        : `Market ${market.status}: ${market.statusReason}`;
+      market.status !== "healthy"
+        ? `Market ${market.status}: ${market.statusReason}`
+        : !qualityGatePassed
+          ? `quality_gate_not_met: ${qualityGateReason}`
+          : recommendation === "bet"
+            ? "Edge & probability above thresholds"
+            : "Below thresholds";
 
     return {
       targetDate: target,

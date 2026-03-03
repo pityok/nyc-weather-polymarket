@@ -9,4 +9,7 @@ export const config = {
   edgeThreshold: Number(process.env.EDGE_THRESHOLD ?? 10),
   minProb: Number(process.env.MIN_PROB ?? 12),
   baselineOnly: process.env.BASELINE_ONLY !== "false",
+  // P3: require 7d quality data before allowing bet signals (default off to avoid breaking production)
+  qualityGateRequired: process.env.QUALITY_GATE_REQUIRED === "true",
+  defaultCityId: process.env.DEFAULT_CITY_ID ?? "nyc",
 } as const;

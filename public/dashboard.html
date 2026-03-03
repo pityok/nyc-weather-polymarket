@@ -45,23 +45,38 @@
       <h2>История run</h2>
       <table id="history"></table>
     </div>
+    <div class="card">
+      <h2>Эволюция прогноза</h2>
+      <div class="muted" id="evolutionMeta"></div>
+      <table id="evolutionTable"></table>
+    </div>
+    <div class="card">
+      <h2>Качество моделей (7d)</h2>
+      <table id="qualityTable"></table>
+    </div>
   </div>
 
 <script>
 function todayYmd(){return new Date().toISOString().slice(0,10)}
 async function load(){
   const date = document.getElementById('date').value || todayYmd();
-  const summaryRes = await fetch(`/api/summary?date=${date}`);
-  const signalsRes = await fetch(`/api/signals?date=${date}`);
-  const marketCurRes = await fetch(`/api/market?date=${date}&type=current`);
-  const marketFixRes = await fetch(`/api/market?date=${date}&type=fixed_1800_msk`);
-  const snapRes = await fetch(`/dashboard/snapshot?includeHistory=true&historyLimit=10`);
+  const [summaryRes, signalsRes, marketCurRes, marketFixRes, snapRes, evolutionRes, qualityRes] = await Promise.all([
+    fetch(`/api/summary?date=${date}`),
+    fetch(`/api/signals?date=${date}`),
+    fetch(`/api/market?date=${date}&type=current`),
+    fetch(`/api/market?date=${date}&type=fixed_1800_msk`),
+    fetch(`/dashboard/snapshot?includeHistory=true&historyLimit=10`),
+    fetch(`/api/evolution?date=${date}`),
+    fetch(`/api/model-quality?windowDays=7`),
+  ]);
   if(!summaryRes.ok){return}
   const summary = await summaryRes.json();
   const signals = await signalsRes.json();
   const marketCur = await marketCurRes.json();
   const marketFix = await marketFixRes.json();
   const snap = await snapRes.json();
+  const evolution = evolutionRes.ok ? await evolutionRes.json() : { versions: [], deltas: [] };
+  const quality = qualityRes.ok ? await qualityRes.json() : { models: [] };
 
   document.getElementById('updated').innerText = `Last updated UTC: ${new Date().toISOString()} | MSK: ${new Date().toLocaleString('sv-SE',{timeZone:'Europe/Moscow'})}`;
 
@@ -83,6 +98,25 @@ async function load(){
 
   document.getElementById('history').innerHTML = `<tr><th>ID</th><th>Horizon</th><th>Target</th></tr>` +
     (snap.history||[]).map(r=>`<tr><td>${r.id.slice(0,8)}</td><td>${r.horizon}</td><td>${String(r.targetDate).slice(0,10)}</td></tr>`).join('');
+
+  // Evolution block: versions + deltas
+  const versions = evolution.versions || [];
+  const deltas = evolution.deltas || [];
+  document.getElementById('evolutionMeta').innerText = `Версий: ${versions.length} | Дельт: ${deltas.length}`;
+  document.getElementById('evolutionTable').innerHTML =
+    `<tr><th>#</th><th>MSK</th><th>Horizon</th><th>Top</th><th>Δtop</th></tr>` +
+    versions.map((v,i)=>{
+      const delta = deltas[i-1];
+      const topChanged = delta && delta.topRangeChanged ? `⬅ ${delta.topRangePrev}` : '';
+      return `<tr><td>${i}</td><td>${v.requestDatetimeMsk||''}</td><td>${v.horizon}</td><td>${v.topRange||'?'}</td><td class="muted">${topChanged}</td></tr>`;
+    }).join('') || '<tr><td colspan="5" class="muted">Нет данных</td></tr>';
+
+  // Quality scoreboard
+  const qModels = quality.models || [];
+  document.getElementById('qualityTable').innerHTML =
+    `<tr><th>Model</th><th>Week</th><th>Weight%</th><th>HitRate</th><th>Brier</th></tr>` +
+    qModels.map(m=>`<tr><td>${m.modelId}</td><td>${m.weekStartDate||''}</td><td>${m.weight.toFixed(2)}</td><td>${m.metrics?.hitRate!=null?(m.metrics.hitRate*100).toFixed(1)+'%':'—'}</td><td>${m.metrics?.brierScore!=null?m.metrics.brierScore.toFixed(4):'—'}</td></tr>`).join('') ||
+    '<tr><td colspan="5" class="muted">Нет данных (запустите backtest)</td></tr>';
 }
 document.getElementById('date').value=todayYmd();
 load();

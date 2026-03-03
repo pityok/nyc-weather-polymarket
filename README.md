@@ -1,12 +1,38 @@
 # nyc-weather-polymarket
 
-Production-ready API: NYC Weather × Polymarket.  
-Стек: Node.js, TypeScript, Express, SQLite (Prisma), Zod, node-cron, Vitest.
+Production API: NYC Weather × Polymarket — прогнозирование максимальной температуры и поиск mispricing на рынке предсказаний.
 
-## Требования
+Стек: Node.js 18+, TypeScript, Express, SQLite (Prisma), Zod, node-cron, Vitest.
 
-- Node.js >= 18
-- npm или pnpm
+---
+
+## Архитектура
+
+```
+Cron (forecastIngestion)
+  └── gatherForecastPayload(horizon, now)
+        ├── targetDateForHorizon(horizon, now)   # NY timezone — источник истины
+        ├── Open-Meteo baseline (с retry/backoff)
+        ├── LLM adapters via OpenRouter (с retry/backoff)
+        ├── computeModelWeights7d()              # 7d quality weights (P1/P3)
+        ├── weightedDistribution()               # реальный weighted consensus
+        ├── getMarketProbabilities()             # ID-first Polymarket lookup (P1)
+        └── edgeSignals: degraded => no_bet      # рисковые гейты
+
+API (Express)
+  ├── /api/summary?date=        → сводка по дате
+  ├── /api/evolution?date=      → эволюция прогноза (P2)
+  ├── /api/model-quality        → качество моделей (P3)
+  ├── /api/cities               → реестр городов (P4)
+  ├── /api/signals, /api/market, /api/runs, /api/backtest
+  └── /dashboard/snapshot       → актуальный снапшот
+
+Dashboard
+  ├── /dashboard.html           → основной дашборд
+  └── /dashboard-by-time.html   → по времени
+```
+
+---
 
 ## Установка
 
@@ -14,141 +40,161 @@ Production-ready API: NYC Weather × Polymarket.
 cp .env.example .env
 npm install
 npm run db:generate
+npm run db:push       # создаёт SQLite схему
+npm run dev           # запуск в режиме разработки
 ```
+
+---
+
+## Конфигурация (.env)
+
+| Переменная | Default | Описание |
+|-----------|---------|----------|
+| `PORT` | `3000` | HTTP порт |
+| `DATABASE_URL` | `file:./dev.db` | SQLite путь |
+| `FORECAST_CRON` | `*/30 * * * *` | Расписание прогнозов |
+| `FORECAST_JOB_ENABLED` | `true` | Включить cron |
+| `BASELINE_ONLY` | `true` | Только Open-Meteo (без LLM) |
+| `OPENROUTER_API_KEY` | — | API ключ OpenRouter |
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Base URL |
+| `POLYMARKET_USE_REAL` | `false` | Включить реальный Polymarket |
+| `POLYMARKET_MARKET_IDS` | `{}` | JSON реестр market IDs по датам |
+| `EDGE_THRESHOLD` | `10` | Минимальный edge для bet (%) |
+| `MIN_PROB` | `12` | Минимальная AI prob для bet (%) |
+| `QUALITY_GATE_REQUIRED` | `false` | P3: требовать 7d качество для bet |
+| `DEFAULT_CITY_ID` | `nyc` | Город по умолчанию |
+
+---
+
+## Polymarket: ID-first market mapping
+
+Система НЕ использует substring matching. Маркет привязывается по стабильному ID.
+
+Настройка через `POLYMARKET_MARKET_IDS` (JSON):
+```json
+{
+  "2026-03-15": { "conditionId": "0xabc..." },
+  "2026-03-16": { "slug": "highest-temperature-in-nyc-march-16" }
+}
+```
+
+Если дата не зарегистрирована → `status: degraded`, `no_bet`. Никаких mock-значений.
+
+---
+
+## Добавить новый город
+
+1. Добавить запись в `src/config/cities.ts`:
+```typescript
+london: {
+  cityId: "london",
+  displayName: "London Heathrow",
+  coords: { lat: 51.477, lon: -0.461 },
+  timezone: "Europe/London",
+}
+```
+
+2. Настроить `POLYMARKET_MARKET_IDS` с market IDs для нового города.
+
+3. Написать smoke test в `src/config/cities.test.ts`.
+
+4. API автоматически поддержит `?cityId=london`.
+
+---
+
+## Деградации / статусы
+
+| Статус | Значение | Действие |
+|--------|----------|----------|
+| `healthy` | Всё OK | Bet по порогам |
+| `degraded` | Частичная работа | `no_bet`, причина в reason |
+| `failed` | Полный отказ | `no_bet`, причина в reason |
+
+Причины деградации market:
+- `POLYMARKET_USE_REAL=false` — рынок выключен конфигом
+- `no_market_id_registered_for_date:YYYY-MM-DD` — нет ID для даты
+- `no_outcomes_in_registered_market` — рынок пустой
+- `Timeout after Nms (after N attempts)` — сеть упала (retry исчерпан)
+
+---
+
+## Интерпретация bet / no_bet
+
+**bet** — сигнал к ставке:
+- `edge >= EDGE_THRESHOLD` (по умолчанию 10%)
+- `aiProb >= MIN_PROB` (по умолчанию 12%)
+- market status = `healthy`
+- quality gate passed (если `QUALITY_GATE_REQUIRED=true`)
+
+**no_bet** — нет ставки. Причина всегда в поле `reason`.
+
+---
+
+## API эндпоинты
+
+### `GET /api/evolution?date=YYYY-MM-DD`
+Эволюция прогноза по targetDate: версии T-2 → T-1 → T0 с дельтами.
+```json
+{
+  "date": "2026-03-10",
+  "versions": [
+    { "versionIndex": 0, "requestDatetimeMsk": "2026-03-08 09:00", "horizon": "day2", "topRange": "r_44_45", "probs": {...} }
+  ],
+  "deltas": [
+    { "topRangeChanged": true, "topRangePrev": "r_42_43", "topRangeCur": "r_44_45", "probDelta": {...} }
+  ]
+}
+```
+
+### `GET /api/model-quality?windowDays=7`
+Качество моделей за N дней.
+```json
+{
+  "windowDays": 7,
+  "models": [
+    { "modelId": "...", "weekStartDate": "2026-03-04", "weight": 65.2, "metrics": { "hitRate": 0.6, "brierScore": 0.18, "calibrationError": 0.12, "n": 5 } }
+  ]
+}
+```
+
+### `GET /api/cities`
+Реестр городов.
+
+### `GET /api/backtest?from=YYYY-MM-DD&to=YYYY-MM-DD`
+Теперь возвращает `modelSummary` — качество по каждой модели за период.
+
+---
 
 ## Скрипты
 
 | Команда | Описание |
 |--------|----------|
-| `npm run dev` | Запуск в режиме разработки (tsx watch) |
-| `npm run build` | Сборка в `dist/` |
-| `npm run start` | Запуск собранного приложения |
-| `npm run test` | Тесты (Vitest, watch) |
+| `npm run dev` | Разработка (tsx watch) |
+| `npm run build` | Сборка TypeScript |
+| `npm run start` | Запуск из `dist/` |
 | `npm run test:run` | Тесты один раз |
-| `npm run lint` | ESLint по `src/` |
+| `npm run lint` | ESLint |
 | `npm run db:generate` | Генерация Prisma Client |
-| `npm run db:push` | Синхронизация схемы с SQLite |
-| `npm run db:migrate` | Миграции (dev) |
+| `npm run db:push` | Синхронизация схемы |
+| `npm run db:migrate` | Миграция (dev) |
 
-## БД (SQLite + Prisma)
+---
 
-Модели:
+## Мониторинг / алерты
 
-- **ForecastRun** — прогон прогноза: runTimeUtc/Msk, targetDate, horizon (today|tomorrow|day2). Связи: modelForecasts, consensuses, edgeSignals.
-- **ModelForecast** — прогноз одной модели: modelId/Name, confidence, rawResponse, probsJson (9 диапазонов), sumBeforeNormalization.
-- **MarketSnapshot** — снимок рынка: targetDate, snapshotTimeUtc, snapshotType (current|fixed_1800_msk), probsJson, source.
-- **Consensus** — консенсус по прогону: method (simple|weighted), probsJson.
-- **EdgeSignal** — сигнал по диапазону: rangeKey, aiProb, marketProb, edge, recommendation (bet|no_bet), reason.
-- **ActualOutcome** — фактический исход по дате: targetDate (unique), winningRangeKey, source.
+- `GET /health` → `{ ok: true }` — базовый healthcheck
+- `GET /dashboard/snapshot` → `status` в `marketSnapshot.source` — маркет degraded?
+- Логи: `[pipeline] weighted consensus fallback: reason=...` — нет качественных данных
+- Логи: `[fetchWithRetry] attempt N failed` — проблемы с внешними API
 
-Индексы: targetDate, snapshotType, createdAt (и комбинации) где нужно для выборок. После изменения схемы: `npm run db:generate` и `npm run db:push` (или `npm run db:migrate` для миграций).
+**Алерт на деградацию:** мониторить `source` в `MarketSnapshot` на наличие `status=degraded`.
+**Алерт на пустой market:** если `items` в `/api/market?date=...` пустой более 2 cron-циклов подряд.
 
-## API
+---
 
-- **GET /health** — проверка работы сервиса. Ответ: `{ "ok": true }`.
-- **POST /forecast-runs** — создать forecast run вручную по payload.
-- **POST /forecast-runs/trigger** — вручную триггернуть job-пайплайн. Ответ: `202` + `started/skipped/error`.
-- **GET /forecast-runs/latest** — получить последний forecast run (или `404`, если нет записей).
-- **GET /forecast-runs?limit=20&offset=0** — список run’ов с пагинацией и счетчиками дочерних сущностей.
-- **GET /forecast-runs/summary?runId=...** — summary по edge signals (или по всем run’ам, если `runId` не указан).
-- **GET /forecast-runs/:id** — получить forecast run с дочерними сущностями.
-- **GET /dashboard/snapshot** — агрегированный snapshot для дашборда (`run + summary + meta`, опционально `history`).
-  - query: `runId?`, `includeHistory?` (default `false`), `historyLimit?` (1..50, default `10`)
-  - пример: `/dashboard/snapshot?includeHistory=true&historyLimit=5`
-- **GET /api/summary?date=YYYY-MM-DD** — forecasts, consensus, market(current/fixed), signals.
-- **GET /api/runs?date=YYYY-MM-DD** — прогоны по дате.
-- **GET /api/market?date=YYYY-MM-DD&type=current|fixed_1800_msk** — market snapshots.
-- **GET /api/signals?date=YYYY-MM-DD** — edge signals по дате.
-- **GET /api/backtest?from=YYYY-MM-DD&to=YYYY-MM-DD** — базовые backtest-метрики.
+## Time domain
 
-## Cron / job
-
-При старте сервера поднимается scheduler (timezone: `Europe/Moscow`).
-
-- `FORECAST_JOB_ENABLED=true|false` — включить/выключить планировщик
-- `FORECAST_CRON` — legacy параметр (оставлен для совместимости)
-
-Расписание (MSK):
-- `00:00, 06:00, 12:00, 18:00` — сбор forecast run для `today`, `tomorrow`, `day2`
-- каждые `10 минут` — refresh market snapshots (`current`)
-- `18:00` — сохранение fixed snapshot (`fixed_1800_msk`)
-
-Логи пишутся с timestamp в UTC и MSK.
-
-Для ручного запуска без ожидания cron используй `POST /forecast-runs/trigger`.
-
-## Структура
-
-```
-src/
-  app.ts          — Express app
-  server.ts       — точка входа
-  config/         — конфигурация
-  db/             — Prisma client
-  types/          — общие типы
-  adapters/       — внешние API
-  llm/            — LLM-логика
-  market/         — Polymarket
-  weather/        — погода
-  services/       — сервисы
-  jobs/           — cron-задачи
-  routes/         — маршруты
-  utils/          — утилиты
-prisma/
-  schema.prisma   — схема БД
-```
-
-## Архитектура (кратко)
-
-- **adapters/**: LLM adapters (единый контракт)
-- **llm/**: парсинг ответа моделей
-- **market/**: mapper Polymarket -> 9 диапазонов
-- **services/**: pipeline, dashboard snapshot, edge logic, backtest, market snapshots
-- **jobs/**: cron orchestration (MSK timezone)
-- **routes/**: REST API + dashboard snapshot
-- **db/**: Prisma repositories
-- **types/**: Zod-схемы и DTO
-
-## ENV variables
-
-- `PORT`
-- `NODE_ENV`
-- `DATABASE_URL`
-- `FORECAST_JOB_ENABLED`
-- `FORECAST_CRON` (legacy)
-- `EDGE_THRESHOLD` (default 10)
-- `MIN_PROB` (default 12)
-
-## Как добавить новую модель
-
-1. Реализуй `LLMAdapter` в `src/adapters/`
-2. Добавь адаптер в `llmAdapters` массив
-3. Убедись, что ответ соответствует контракту (probs/confidence/reasoningSummary)
-
-## Как интерпретировать сигнал
-
-- `bet` — если `edge >= EDGE_THRESHOLD` и `consensusProb >= MIN_PROB`
-- `no_bet` — иначе
-
-## Правило по рыночным данным (обязательно)
-
-Для каждого AI-прогона в системе всегда храним и показываем **две отдельные строки рынка**:
-
-1. **Рынок на момент запроса** (snapshot, зафиксированный в ту же минуту, когда отправлен запрос моделям)
-2. **Рынок сейчас** (последний доступный current snapshot на момент просмотра дашборда)
-
-Это правило обязательное для пайплайна, БД и UI: сравнение AI/edge должно опираться на обе строки одновременно.
-
-## One-command start
-
-```bash
-./scripts/start.sh
-```
-
-## Docker
-
-```bash
-docker compose up --build
-```
-
-Приложение будет доступно на `http://localhost:3000`, а SQLite хранится в volume `sqlite_data`.
+- **Источник истины**: America/New_York timezone для расчёта targetDate/horizon
+- **Хранение**: UTC midnight (`T00:00:00.000Z`)
+- **Логи**: UTC + MSK для отображения
+- **DST**: обрабатывается автоматически через `Intl.DateTimeFormat`
