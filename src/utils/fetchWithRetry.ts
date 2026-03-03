@@ -1,8 +1,12 @@
+import { recordCall } from "./metrics.js";
+
 export type FetchRetryConfig = {
   timeoutMs: number;
   maxRetries: number;
   baseDelayMs: number;
   maxDelayMs: number;
+  /** Service label for metrics tracking (e.g. "open-meteo", "polymarket", "openrouter"). */
+  service?: string;
 };
 
 export const RETRY_OPEN_METEO: FetchRetryConfig = {
@@ -10,6 +14,7 @@ export const RETRY_OPEN_METEO: FetchRetryConfig = {
   maxRetries: 3,
   baseDelayMs: 500,
   maxDelayMs: 8_000,
+  service: "open-meteo",
 };
 
 export const RETRY_POLYMARKET: FetchRetryConfig = {
@@ -17,6 +22,7 @@ export const RETRY_POLYMARKET: FetchRetryConfig = {
   maxRetries: 3,
   baseDelayMs: 500,
   maxDelayMs: 8_000,
+  service: "polymarket",
 };
 
 export const RETRY_OPENROUTER: FetchRetryConfig = {
@@ -24,6 +30,7 @@ export const RETRY_OPENROUTER: FetchRetryConfig = {
   maxRetries: 2,
   baseDelayMs: 1_000,
   maxDelayMs: 10_000,
+  service: "openrouter",
 };
 
 function isRetryableStatus(status: number): boolean {
@@ -43,7 +50,8 @@ function sleep(ms: number): Promise<void> {
 type KnownError = Error & { retryable?: boolean };
 
 /**
- * Fetch with timeout, exponential backoff retries, and retryable/non-retryable error classification.
+ * Fetch with timeout, exponential backoff retries, retryable/non-retryable classification,
+ * and automatic metrics recording (latency, retry count, error rate).
  *
  * Non-retryable: 4xx (except 429), explicit retryable=false errors.
  * Retryable: 429, 5xx, network errors, timeouts.
@@ -53,7 +61,9 @@ export async function fetchWithRetry(
   options: RequestInit,
   config: FetchRetryConfig,
 ): Promise<Response> {
+  const started = Date.now();
   let lastError: Error = new Error("fetchWithRetry: no attempts");
+  let retriesUsed = 0;
 
   for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
     const controller = new AbortController();
@@ -63,7 +73,12 @@ export async function fetchWithRetry(
       const res = await fetch(url, { ...options, signal: controller.signal });
       clearTimeout(timer);
 
-      if (res.ok) return res;
+      if (res.ok) {
+        if (config.service) {
+          recordCall(config.service, Date.now() - started, retriesUsed);
+        }
+        return res;
+      }
 
       if (!isRetryableStatus(res.status)) {
         throw Object.assign(new Error(`HTTP ${res.status} (non-retryable)`), { retryable: false });
@@ -75,6 +90,9 @@ export async function fetchWithRetry(
       const e: KnownError = err instanceof Error ? err : new Error(String(err));
 
       if (e.retryable === false) {
+        if (config.service) {
+          recordCall(config.service, Date.now() - started, retriesUsed, e.message);
+        }
         throw e;
       }
 
@@ -86,6 +104,7 @@ export async function fetchWithRetry(
     }
 
     if (attempt < config.maxRetries) {
+      retriesUsed += 1;
       const delay = calcDelay(attempt, config.baseDelayMs, config.maxDelayMs);
       console.warn(
         `[fetchWithRetry] attempt ${attempt + 1}/${config.maxRetries + 1} failed for ${url}: ${lastError.message}. Retrying in ${Math.round(delay)}ms`,
@@ -94,5 +113,9 @@ export async function fetchWithRetry(
     }
   }
 
-  throw new Error(`${lastError.message} (after ${config.maxRetries + 1} attempt(s))`);
+  const finalMsg = `${lastError.message} (after ${config.maxRetries + 1} attempt(s))`;
+  if (config.service) {
+    recordCall(config.service, Date.now() - started, retriesUsed, finalMsg);
+  }
+  throw new Error(finalMsg);
 }

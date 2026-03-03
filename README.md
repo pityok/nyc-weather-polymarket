@@ -183,12 +183,25 @@ london: {
 ## Мониторинг / алерты
 
 - `GET /health` → `{ ok: true }` — базовый healthcheck
-- `GET /dashboard/snapshot` → `status` в `marketSnapshot.source` — маркет degraded?
+- `GET /health/metrics` → in-memory метрики по каждому внешнему сервису:
+  ```json
+  {
+    "ok": true,
+    "db": { "ok": true },
+    "services": {
+      "open-meteo":  { "callCount": 48, "errorCount": 0, "retryCount": 2, "avgLatencyMs": 312, "errorRate": 0 },
+      "polymarket":  { "callCount": 48, "errorCount": 1, "retryCount": 0, "avgLatencyMs": 890, "errorRate": 0.0208 },
+      "openrouter":  { "callCount": 96, "errorCount": 0, "retryCount": 1, "avgLatencyMs": 4210, "errorRate": 0 }
+    }
+  }
+  ```
 - Логи: `[pipeline] weighted consensus fallback: reason=...` — нет качественных данных
-- Логи: `[fetchWithRetry] attempt N failed` — проблемы с внешними API
+- Логи: `[fetchWithRetry] attempt N failed` — retry с причиной
 
-**Алерт на деградацию:** мониторить `source` в `MarketSnapshot` на наличие `status=degraded`.
-**Алерт на пустой market:** если `items` в `/api/market?date=...` пустой более 2 cron-циклов подряд.
+**Алерт на деградацию market:** `polymarket.errorRate > 0` или `no_bet` во всех сигналах.
+**Алерт на пустой market:** `/api/market?date=...` пустой более 2 cron-циклов.
+
+→ Полный release checklist, smoke suite, rollback plan, DB backup: **[RELEASE.md](./RELEASE.md)**
 
 ---
 
