@@ -100,6 +100,14 @@ function topRange(probs){
   return entries[0]?.[0] || '-';
 }
 function fmt(n){ return Number(num(n).toFixed(2)); }
+function asTs(v){ const t = new Date(v || 0).getTime(); return Number.isFinite(t) ? t : 0; }
+function modelLabel(name,id){
+  const n = String(name || '').trim();
+  if(/baseline/i.test(n) || /baseline/i.test(String(id||''))){
+    return `Model Baseline Meteo${n ? ` (${n})` : ''}`;
+  }
+  return `Model: ${n || id || 'unknown'}`;
+}
 
 function isHealthyMarketSnapshot(item){
   const src = String(item?.source || '').toLowerCase();
@@ -167,9 +175,15 @@ async function load(){
   const simple = latestConsensusRaw.find(c => c.method === 'simple');
   const consensus = weighted || simple || latestConsensusRaw[0] || null;
 
-  const latestRunForecasts = (summary.forecasts || [])
-    .filter(f => !latestRunId || f.forecastRunId === latestRunId)
-    .sort((a,b)=> (a.modelName || '').localeCompare(b.modelName || ''));
+  const runById = new Map((runs.items || []).map(r => [r.id, r]));
+  const allForecastsChrono = (summary.forecasts || [])
+    .map(f => ({ ...f, __run: runById.get(f.forecastRunId) || null }))
+    .sort((a,b)=> {
+      const at = asTs(a.__run?.runTimeUtc || a.createdAt);
+      const bt = asTs(b.__run?.runTimeUtc || b.createdAt);
+      if (at !== bt) return at - bt;
+      return String(a.modelName || a.modelId || '').localeCompare(String(b.modelName || b.modelId || ''));
+    });
 
   const healthyCurrentItems = (marketCur.items || []).filter(isHealthyMarketSnapshot);
   const healthyFixedItems = (marketFix.items || []).filter(isHealthyMarketSnapshot);
@@ -188,7 +202,8 @@ async function load(){
     <tr><td>Market now (healthy)</td><td>${marketNow ? (marketNow.snapshotTimeUtc || 'yes') : 'no'}</td></tr>
     <tr><td>Market at request (healthy, <= run time)</td><td>${marketAtRequest ? (marketAtRequest.snapshotTimeUtc || 'yes') : 'no'}</td></tr>
     <tr><td>Market 18:00 MSK (healthy)</td><td>${marketFixed ? (marketFixed.snapshotTimeUtc || 'yes') : 'no'}</td></tr>
-    <tr><td>Model forecasts (latest run)</td><td>${latestRunForecasts.length}</td></tr>
+    <tr><td>Model forecasts (all requests)</td><td>${allForecastsChrono.length}</td></tr>
+    <tr><td>Runs in date</td><td>${(runs.items||[]).length}</td></tr>
     <tr><td>Signals total</td><td>${(signals.items||[]).length}</td></tr>`;
 
   // Bets
@@ -204,7 +219,10 @@ async function load(){
     rows.push(`<tr><td><strong>${label}</strong><div class="muted">${meta}</div></td>${cols}<td><strong>${topRange(p)}</strong></td></tr>`);
   }
 
-  if(consensus) row(`Consensus (${consensus.method||'unknown'})`, consensus.probsJson, consensus.createdAt || '');
+  if(consensus) {
+    const cRun = runById.get(consensus.forecastRunId);
+    row(`Consensus (${consensus.method||'unknown'})`, consensus.probsJson, `latest run: ${cRun?.runTimeUtc || consensus.createdAt || ''}`);
+  }
 
   if(marketAtRequest) {
     row('Polymarket на момент запроса', marketAtRequest.probsJson, `${marketAtRequest.snapshotTimeUtc || ''}`);
@@ -224,13 +242,17 @@ async function load(){
     rows.push(`<tr><td><strong>Polymarket в 18:00 MSK</strong><div class="muted">нет healthy fixed snapshot (в БД только mock/degraded)</div></td>${'<td>—</td>'.repeat(RANGE_COLS.length)}<td>—</td></tr>`);
   }
 
-  for(const f of latestRunForecasts){
-    row(`Model: ${f.modelName || f.modelId}`, f.probsJson, `${f.modelId || ''}`);
+  for(const f of allForecastsChrono){
+    const run = f.__run;
+    const reqUtc = run?.runTimeUtc || f.createdAt || '';
+    const reqMsk = reqUtc ? new Date(reqUtc).toLocaleString('sv-SE',{timeZone:'Europe/Moscow'}) : '';
+    const meta = `${reqUtc ? `req UTC ${reqUtc}` : ''}${reqMsk ? ` | MSK ${reqMsk}` : ''}${run?.horizon ? ` | ${run.horizon}` : ''}${run?.id ? ` | run ${String(run.id).slice(0,8)}` : ''}`;
+    row(modelLabel(f.modelName, f.modelId), f.probsJson, meta);
   }
 
   const head = RANGE_COLS.map(([,label])=>`<th>${label}</th>`).join('');
   document.getElementById('probMatrix').innerHTML = `<tr><th>Источник</th>${head}<th>Top</th></tr>` + (rows.join('') || '<tr><td colspan="14" class="muted">Нет данных</td></tr>');
-  document.getElementById('probMeta').innerText = `Показываются ВСЕ диапазоны вероятностей, не только top. Для строк Polymarket учитываются только healthy snapshots (mock/degraded скрыты).`;
+  document.getElementById('probMeta').innerText = `Показываются ВСЕ диапазоны вероятностей (не только top). Модельные строки выведены по всем запросам за дату в хронологическом порядке. Для Polymarket учитываются только healthy snapshots (mock/degraded скрыты).`;
 
   // Evolution
   const versions = evolution.versions || [];
