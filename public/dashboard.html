@@ -33,10 +33,18 @@
 
   <div class="grid">
     <div class="card" style="grid-column:1 / -1">
-      <h2>Матрица вероятностей (%): модели + рынок + консенсус</h2>
+      <h2>Матрица вероятностей (%): модели + рынок + консенсус (12 bins)</h2>
       <div class="muted" id="probMeta"></div>
       <div class="scroll-x">
         <table id="probMatrix"></table>
+      </div>
+    </div>
+
+    <div class="card" style="grid-column:1 / -1">
+      <h2>Polymarket Native (9 bins, как на рынке)</h2>
+      <div class="muted" id="nativeMeta"></div>
+      <div class="scroll-x">
+        <table id="nativeMarketTable"></table>
       </div>
     </div>
 
@@ -139,11 +147,12 @@ async function load(){
   const date = document.getElementById('date').value || todayYmd();
   const cityId = document.getElementById('citySelect').value || 'nyc';
 
-  const [summaryRes, signalsRes, marketCurRes, marketFixRes, runsRes, snapRes, evolutionRes, qualityRes] = await Promise.all([
+  const [summaryRes, signalsRes, marketCurRes, marketFixRes, marketNativeRes, runsRes, snapRes, evolutionRes, qualityRes] = await Promise.all([
     fetch(`/api/summary?date=${date}&cityId=${cityId}`),
     fetch(`/api/signals?date=${date}&cityId=${cityId}`),
     fetch(`/api/market?date=${date}&type=current&cityId=${cityId}`),
     fetch(`/api/market?date=${date}&type=fixed_1800_msk&cityId=${cityId}`),
+    fetch(`/api/polymarket-native?date=${date}&cityId=${cityId}`),
     fetch(`/api/runs?date=${date}&cityId=${cityId}`),
     fetch(`/dashboard/snapshot?includeHistory=true&historyLimit=10&cityId=${cityId}`),
     fetch(`/api/evolution?date=${date}&cityId=${cityId}`),
@@ -159,6 +168,7 @@ async function load(){
   const signals = signalsRes.ok ? await signalsRes.json() : {items:[]};
   const marketCur = marketCurRes.ok ? await marketCurRes.json() : {items:[]};
   const marketFix = marketFixRes.ok ? await marketFixRes.json() : {items:[]};
+  const marketNative = marketNativeRes.ok ? await marketNativeRes.json() : { status: 'failed', reason: `http_${marketNativeRes.status}`, bins: [] };
   const runs = runsRes.ok ? await runsRes.json() : {items:[]};
   const snap = snapRes.ok ? await snapRes.json() : {history:[]};
   const evolution = evolutionRes.ok ? await evolutionRes.json() : { versions: [], deltas: [] };
@@ -204,6 +214,7 @@ async function load(){
     <tr><td>Market 18:00 MSK (healthy)</td><td>${marketFixed ? (marketFixed.snapshotTimeUtc || 'yes') : 'no'}</td></tr>
     <tr><td>Model forecasts (all requests)</td><td>${allForecastsChrono.length}</td></tr>
     <tr><td>Runs in date</td><td>${(runs.items||[]).length}</td></tr>
+    <tr><td>Polymarket native bins</td><td>${(marketNative?.bins || []).length} (${marketNative?.status || 'unknown'})</td></tr>
     <tr><td>Signals total</td><td>${(signals.items||[]).length}</td></tr>`;
 
   // Bets
@@ -253,6 +264,15 @@ async function load(){
   const head = RANGE_COLS.map(([,label])=>`<th>${label}</th>`).join('');
   document.getElementById('probMatrix').innerHTML = `<tr><th>Источник</th>${head}<th>Top</th></tr>` + (rows.join('') || '<tr><td colspan="14" class="muted">Нет данных</td></tr>');
   document.getElementById('probMeta').innerText = `Показываются ВСЕ диапазоны вероятностей (не только top). Модельные строки выведены по всем запросам за дату в хронологическом порядке. Для Polymarket учитываются только healthy snapshots (mock/degraded скрыты).`;
+
+  // Native polymarket (9 bins as-is)
+  const nativeBins = marketNative?.bins || [];
+  document.getElementById('nativeMeta').innerText = `status=${marketNative?.status || 'unknown'} | reason=${marketNative?.reason || ''} | source=${marketNative?.source || ''}`;
+  document.getElementById('nativeMarketTable').innerHTML =
+    `<tr><th>Bin</th><th>YES %</th><th>NO %</th><th>Question</th></tr>` +
+    (nativeBins.length
+      ? nativeBins.map(b=>`<tr><td><strong>${b.label || b.key}</strong></td><td>${fmt(b.yesProb)}</td><td>${fmt(b.noProb)}</td><td class="muted">${b.question || ''}</td></tr>`).join('')
+      : `<tr><td colspan="4" class="muted">Нет native bins (проверь статус/slug/источник)</td></tr>`);
 
   // Evolution
   const versions = evolution.versions || [];

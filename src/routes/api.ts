@@ -13,6 +13,7 @@ import {
   modelQualityQuerySchema,
 } from "../types/apiQuery.js";
 import { CITY_REGISTRY } from "../config/cities.js";
+import { getPolymarketNativeBins } from "../services/polymarketNative.service.js";
 
 const router = Router();
 
@@ -240,6 +241,16 @@ router.get("/api/market", async (req, res, next) => {
     });
 
     res.json({ date, type, items });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/api/polymarket-native", async (req, res, next) => {
+  try {
+    const { date, cityId } = apiSummaryQuerySchema.parse(req.query);
+    const result = await getPolymarketNativeBins(date, cityId);
+    res.json({ date, cityId, ...result });
   } catch (error) {
     next(error);
   }
