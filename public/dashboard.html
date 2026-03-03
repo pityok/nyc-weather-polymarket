@@ -63,6 +63,8 @@
 function todayYmd(){return new Date().toISOString().slice(0,10)}
 async function load(){
   const date = document.getElementById('date').value || todayYmd();
+  const cityId = document.getElementById('citySelect').value || 'nyc';
+
   const [summaryRes, signalsRes, marketCurRes, marketFixRes, snapRes, evolutionRes, qualityRes] = await Promise.all([
     fetch(`/api/summary?date=${date}&cityId=${cityId}`),
     fetch(`/api/signals?date=${date}&cityId=${cityId}`),
@@ -72,7 +74,11 @@ async function load(){
     fetch(`/api/evolution?date=${date}&cityId=${cityId}`),
     fetch(`/api/model-quality?windowDays=7&cityId=${cityId}`),
   ]);
-  if(!summaryRes.ok){return}
+
+  if(!summaryRes.ok){
+    document.getElementById('updated').innerText = `Ошибка загрузки summary (${summaryRes.status})`;
+    return;
+  }
   const summary = await summaryRes.json();
   const signals = await signalsRes.json();
   const marketCur = await marketCurRes.json();
