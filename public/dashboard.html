@@ -16,6 +16,9 @@
     select,input{background:#fff;color:#1c2434;border:1px solid #c7d3ea;padding:6px;border-radius:6px}
     .muted{color:#5a6c8f;font-size:12px}
     #reloadBtn{margin-left:12px;background:#2f6fed;color:#fff;border:1px solid #2f6fed;padding:6px 10px;border-radius:6px;cursor:pointer}
+    .rec{padding:10px 12px;border-radius:8px;border:1px solid #dbe3f1;background:#f8fbff}
+    .rec.bet{background:#e9f8ef;border-color:#bde8cb;color:#175c32}
+    .rec.nobet{background:#fff5e8;border-color:#f0d6ad;color:#6a4a15}
   </style>
 </head>
 <body>
@@ -47,6 +50,11 @@
       <div class="scroll-x">
         <table id="nativeMarketTable"></table>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>Торговая рекомендация</h2>
+      <div id="recommendationBox" class="muted">Загрузка...</div>
     </div>
 
     <div class="card">
@@ -234,8 +242,25 @@ async function load(){
     <tr><td>Polymarket native bins</td><td>${(marketNative?.bins || []).length} (${marketNative?.status || 'unknown'})</td></tr>
     <tr><td>Signals total</td><td>${(signals.items||[]).length}</td></tr>`;
 
-  // Bets
-  const bets = (signals.items||[]).filter(s=>s.recommendation==='bet').sort((a,b)=>b.edge-a.edge).slice(0,10);
+  // Bets + recommendation
+  const allSignals = (signals.items||[]).slice().sort((a,b)=>num(b.edge)-num(a.edge));
+  const bets = allSignals.filter(s=>String(s.recommendation).toLowerCase()==='bet').slice(0,10);
+
+  const bestBet = allSignals.find(s=>String(s.recommendation).toLowerCase()==='bet') || null;
+  const bestNoBet = allSignals[0] || null;
+  const recEl = document.getElementById('recommendationBox');
+  if(bestBet){
+    recEl.className = 'rec bet';
+    recEl.innerHTML = `<div><strong>BET</strong> · ${bestBet.rangeKey}</div>
+      <div>Edge: ${fmt(bestBet.edge)}% · AI: ${fmt(bestBet.aiProb)}% · Market: ${fmt(bestBet.marketProb)}%</div>
+      <div class="muted">Reason: ${bestBet.reason || 'thresholds passed'}</div>`;
+  } else {
+    recEl.className = 'rec nobet';
+    recEl.innerHTML = `<div><strong>NO_BET</strong></div>
+      <div>${bestNoBet ? `Лучший edge сейчас: ${fmt(bestNoBet.edge)}% (${bestNoBet.rangeKey})` : 'Сигналов нет'}</div>
+      <div class="muted">${bestNoBet?.reason || 'Недостаточно edge/вероятности или рынок не healthy'}</div>`;
+  }
+
   document.getElementById('betsTable').innerHTML = `<tr><th>Range</th><th>Edge</th><th>AI</th><th>Market</th><th>Reason</th></tr>` +
     (bets.length ? bets.map(b=>`<tr><td>${b.rangeKey}</td><td>${fmt(b.edge)}</td><td>${fmt(b.aiProb)}</td><td>${fmt(b.marketProb)}</td><td>${b.reason||''}</td></tr>`).join('') : '<tr><td colspan="5" class="muted">Нет bet сигналов</td></tr>');
 
