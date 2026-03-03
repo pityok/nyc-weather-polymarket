@@ -11,6 +11,13 @@ describe("city registry (P4 smoke)", () => {
     expect(typeof nyc?.coords.lon).toBe("number");
   });
 
+  it("London is in the registry", () => {
+    const london = getCity("london");
+    expect(london).not.toBeNull();
+    expect(london?.cityId).toBe("london");
+    expect(london?.timezone).toBe("Europe/London");
+  });
+
   it("returns null for unknown city", () => {
     expect(getCity("mars")).toBeNull();
   });

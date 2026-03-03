@@ -113,6 +113,7 @@ async function getBaselineDistribution(targetDate: string, cityId = "nyc"): Prom
 export async function gatherForecastPayload(
   horizon: ForecastHorizon = "tomorrow",
   now = new Date(),
+  cityId = config.defaultCityId,
 ): Promise<CreateForecastRunPayload> {
   // Use NY timezone as source of truth for targetDate/horizon (fixes UTC-based bug)
   const targetDate = targetDateForHorizon(horizon, now);
@@ -127,8 +128,8 @@ export async function gatherForecastPayload(
   if (config.baselineOnly) {
     // Baseline mode: Open-Meteo only, no LLM. Run weights + market in parallel.
     const [baseline, wr] = await Promise.all([
-      getBaselineDistribution(targetDate),
-      computeModelWeights7d(now),
+      getBaselineDistribution(targetDate, cityId),
+      computeModelWeights7d(now, cityId),
     ]);
     weightsResult = wr;
     simple = baseline;
@@ -138,7 +139,7 @@ export async function gatherForecastPayload(
         modelId: "baseline/open-meteo",
         modelName: "Baseline Open-Meteo",
         confidence: "medium",
-        rawResponse: { targetDate, mode: "baseline_only" },
+        rawResponse: { targetDate, mode: "baseline_only", cityId },
         probsJson: baseline,
         sumBeforeNormalization: 100,
       },
@@ -151,11 +152,11 @@ export async function gatherForecastPayload(
           adapter.getForecast({
             targetDate,
             location: "NYC LaGuardia",
-            context: { note: "Do not use market probabilities" },
+            context: { note: "Do not use market probabilities", cityId },
           }),
         ),
       ),
-      computeModelWeights7d(now),
+      computeModelWeights7d(now, cityId),
     ]);
     weightsResult = wr;
 
@@ -199,7 +200,7 @@ export async function gatherForecastPayload(
     }
   }
 
-  const market = await getMarketProbabilities(targetDate, "current");
+  const market = await getMarketProbabilities(targetDate, "current", cityId);
   const marketDist = market.distribution;
 
   // P3 quality gate: if QUALITY_GATE_REQUIRED=true and quality data insufficient → no_bet
@@ -246,6 +247,7 @@ export async function gatherForecastPayload(
       runTimeMsk: new Date(now.getTime() + 3 * 60 * 60 * 1000),
       targetDate: target,
       horizon,
+      cityId,
     },
     modelForecasts,
     consensuses: [
@@ -259,15 +261,20 @@ export async function gatherForecastPayload(
       snapshotType: "current",
       probsJson: marketDist,
       source: `${market.source}|status=${market.status}|reason=${market.statusReason}${market.eventId ? `|eventId=${market.eventId}` : ""}`,
+      cityId,
     },
   };
 }
 
-export async function runForecastPipeline(horizon: ForecastHorizon = "tomorrow"): Promise<PipelineResult> {
+export async function runForecastPipeline(
+  horizon: ForecastHorizon = "tomorrow",
+  cityId = config.defaultCityId,
+): Promise<PipelineResult> {
   const started = Date.now();
 
   try {
-    const payload = createForecastRunPayloadSchema.parse(await gatherForecastPayload(horizon));
+    const now = new Date();
+    const payload = createForecastRunPayloadSchema.parse(await gatherForecastPayload(horizon, now, cityId));
     const result = await createForecastRunWithData(payload);
 
     return {

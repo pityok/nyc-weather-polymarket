@@ -26,11 +26,11 @@ const MIN_OUTCOMES_FOR_WEIGHTS = 3;
  *
  * Returns ok=false with explicit reason when there are not enough outcomes.
  */
-export async function computeModelWeights7d(now = new Date()): Promise<ModelWeightsResult> {
+export async function computeModelWeights7d(now = new Date(), cityId = "nyc"): Promise<ModelWeightsResult> {
   const windowStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
   const outcomes = await prisma.actualOutcome.findMany({
-    where: { targetDate: { gte: windowStart } },
+    where: { targetDate: { gte: windowStart }, cityId },
     select: { targetDate: true, winningRangeKey: true },
   });
 
@@ -47,7 +47,7 @@ export async function computeModelWeights7d(now = new Date()): Promise<ModelWeig
   );
 
   const runs = await prisma.forecastRun.findMany({
-    where: { targetDate: { gte: windowStart } },
+    where: { targetDate: { gte: windowStart }, cityId },
     select: {
       targetDate: true,
       modelForecasts: {

@@ -20,6 +20,12 @@ export const CITY_REGISTRY: Record<string, CityConfig> = {
     timezone: "America/New_York",
     marketResolverConfig: { defaultSlugPrefix: "highest-temperature-in-nyc" },
   },
+  london: {
+    cityId: "london",
+    displayName: "London Heathrow",
+    coords: { lat: 51.477, lon: -0.461 },
+    timezone: "Europe/London",
+  },
 };
 
 export function getCity(cityId: string): CityConfig | null {

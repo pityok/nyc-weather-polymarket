@@ -24,15 +24,15 @@ type ModelQualityStats = {
   calibrationSum: number;
 };
 
-export async function runBacktest(from: string, to: string) {
+export async function runBacktest(from: string, to: string, cityId = "nyc") {
   const fromDate = toDateStart(from);
   const toDate = toDateEnd(to);
 
   const [signals, outcomes, consensuses] = await Promise.all([
-    prisma.edgeSignal.findMany({ where: { targetDate: { gte: fromDate, lte: toDate } } }),
-    prisma.actualOutcome.findMany({ where: { targetDate: { gte: fromDate, lte: toDate } } }),
+    prisma.edgeSignal.findMany({ where: { targetDate: { gte: fromDate, lte: toDate }, cityId } }),
+    prisma.actualOutcome.findMany({ where: { targetDate: { gte: fromDate, lte: toDate }, cityId } }),
     prisma.consensus.findMany({
-      where: { forecastRun: { targetDate: { gte: fromDate, lte: toDate } } },
+      where: { forecastRun: { targetDate: { gte: fromDate, lte: toDate }, cityId } },
       include: { forecastRun: { include: { modelForecasts: true } } },
     }),
   ]);
@@ -141,16 +141,18 @@ export async function runBacktest(from: string, to: string) {
       const calibrationError = stats.n ? stats.calibrationSum / stats.n : 1;
 
       await prisma.weeklyModelWeight.upsert({
-        where: { weekStartDate_modelId: { weekStartDate: new Date(week), modelId } },
+        where: { cityId_weekStartDate_modelId: { cityId, weekStartDate: new Date(week), modelId } },
         create: {
           weekStartDate: new Date(week),
           modelId,
           weight,
           metricsJson: safeStringify({ hitRate, brierScore, calibrationError, n: stats.n }),
+          cityId,
         },
         update: {
           weight,
           metricsJson: safeStringify({ hitRate, brierScore, calibrationError, n: stats.n }),
+          cityId,
         },
       });
     }

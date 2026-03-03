@@ -11,7 +11,8 @@ import type { CreateForecastRunPayload } from "../types/forecastRunPayload.js";
 
 export async function createForecastRunWithData(input: CreateForecastRunPayload) {
   const runId = await prisma.$transaction(async (tx) => {
-    const run = await createForecastRun(input.run, tx);
+    const cityId = (input.run as any).cityId ?? "nyc";
+    const run = await createForecastRun({ ...input.run, cityId }, tx);
 
     for (const modelForecast of input.modelForecasts) {
       await createModelForecast(
@@ -25,12 +26,12 @@ export async function createForecastRunWithData(input: CreateForecastRunPayload)
     }
 
     await createEdgeSignalsBulk(
-      input.edgeSignals.map((edgeSignal) => ({ ...edgeSignal, forecastRunId: run.id })),
+      input.edgeSignals.map((edgeSignal) => ({ ...edgeSignal, forecastRunId: run.id, cityId })),
       tx,
     );
 
     if (input.marketSnapshot) {
-      await createMarketSnapshot(input.marketSnapshot, tx);
+      await createMarketSnapshot({ ...input.marketSnapshot, cityId }, tx);
     }
 
     return run.id;

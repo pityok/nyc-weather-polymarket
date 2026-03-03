@@ -20,7 +20,11 @@ function neutralDistribution(): Distribution {
   return normalizeDistribution(eq);
 }
 
-export async function getMarketProbabilities(targetDate: string, snapshotType: SnapshotType): Promise<MarketResult> {
+export async function getMarketProbabilities(
+  targetDate: string,
+  snapshotType: SnapshotType,
+  _cityId = "nyc",
+): Promise<MarketResult> {
   const useReal = process.env.POLYMARKET_USE_REAL === "true";
 
   if (!useReal) {

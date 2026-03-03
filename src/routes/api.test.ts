@@ -93,3 +93,102 @@ describe("/api endpoints", () => {
     expect(backtest.body.totalSignals).toBe(1);
   });
 });
+
+describe("/api endpoints with cityId", () => {
+  it("cityId isolates data between nyc and london", async () => {
+    await request(app).post("/forecast-runs").send(basePayload);
+    await request(app)
+      .post("/forecast-runs")
+      .send({
+        ...basePayload,
+        run: { ...basePayload.run, cityId: "london" },
+        marketSnapshot: { ...basePayload.marketSnapshot, source: "market-api-london" },
+      });
+
+    const nycSummary = await request(app).get("/api/summary?date=2026-02-27&cityId=nyc");
+    const londonSummary = await request(app).get("/api/summary?date=2026-02-27&cityId=london");
+
+    expect(nycSummary.status).toBe(200);
+    expect(londonSummary.status).toBe(200);
+    expect(nycSummary.body.forecasts.length).toBe(1);
+    expect(londonSummary.body.forecasts.length).toBe(1);
+
+    const nycSignals = await request(app).get("/api/signals?date=2026-02-27&cityId=nyc");
+    const londonSignals = await request(app).get("/api/signals?date=2026-02-27&cityId=london");
+    expect(nycSignals.body.items.length).toBe(1);
+    expect(londonSignals.body.items.length).toBe(1);
+  });
+
+  it("default cityId=nyc when omitted", async () => {
+    await request(app).post("/forecast-runs").send(basePayload);
+    await request(app)
+      .post("/forecast-runs")
+      .send({
+        ...basePayload,
+        run: { ...basePayload.run, cityId: "london" },
+        marketSnapshot: { ...basePayload.marketSnapshot, source: "market-api-london" },
+      });
+
+    const res = await request(app).get("/api/summary?date=2026-02-27");
+    expect(res.status).toBe(200);
+    expect(res.body.forecasts.length).toBe(1);
+  });
+
+  it("persists cityId end-to-end via /forecast-runs", async () => {
+    await request(app)
+      .post("/forecast-runs")
+      .send({
+        ...basePayload,
+        run: { ...basePayload.run, cityId: "london" },
+        marketSnapshot: { ...basePayload.marketSnapshot, source: "market-api-london" },
+      });
+
+    const runs = await prisma.forecastRun.findMany();
+    expect(runs[0].cityId).toBe("london");
+
+    const snaps = await prisma.marketSnapshot.findMany();
+    expect(snaps[0].cityId).toBe("london");
+
+    const edges = await prisma.edgeSignal.findMany();
+    expect(edges[0].cityId).toBe("london");
+  });
+
+  it("evolution is city-scoped", async () => {
+    await request(app).post("/forecast-runs").send(basePayload);
+    await request(app)
+      .post("/forecast-runs")
+      .send({
+        ...basePayload,
+        run: { ...basePayload.run, cityId: "london" },
+        marketSnapshot: { ...basePayload.marketSnapshot, source: "market-api-london" },
+      });
+
+    const evoNyc = await request(app).get("/api/evolution?date=2026-02-27&cityId=nyc");
+    const evoLondon = await request(app).get("/api/evolution?date=2026-02-27&cityId=london");
+
+    expect(evoNyc.status).toBe(200);
+    expect(evoLondon.status).toBe(200);
+    expect(evoNyc.body.versions.length).toBe(1);
+    expect(evoLondon.body.versions.length).toBe(1);
+  });
+
+  it("model-quality is city-scoped", async () => {
+    const week = new Date("2026-03-02T00:00:00.000Z");
+    await prisma.weeklyModelWeight.deleteMany();
+    await prisma.weeklyModelWeight.createMany({
+      data: [
+        { weekStartDate: week, modelId: "model-nyc", weight: 50, metricsJson: "{}", cityId: "nyc" },
+        { weekStartDate: week, modelId: "model-london", weight: 50, metricsJson: "{}", cityId: "london" },
+      ],
+    });
+
+    const nyc = await request(app).get("/api/model-quality?windowDays=7&cityId=nyc");
+    const london = await request(app).get("/api/model-quality?windowDays=7&cityId=london");
+
+    expect(nyc.status).toBe(200);
+    expect(london.status).toBe(200);
+    expect(nyc.body.models.some((m: any) => m.modelId === "model-nyc")).toBe(true);
+    expect(nyc.body.models.some((m: any) => m.modelId === "model-london")).toBe(false);
+    expect(london.body.models.some((m: any) => m.modelId === "model-london")).toBe(true);
+  });
+});

@@ -31,17 +31,20 @@ export function __resetForecastJobLock() {
   isRunning = false;
 }
 
-export async function runForecastIngestionJob(horizon: ForecastHorizon = "tomorrow"): Promise<TriggerResult> {
+export async function runForecastIngestionJob(
+  horizon: ForecastHorizon = "tomorrow",
+  cityId = config.defaultCityId,
+): Promise<TriggerResult> {
   if (isRunning) {
     logWithTime("forecast-job", `skipped: already running (horizon=${horizon})`);
     return { status: "skipped", reason: "already running" };
   }
 
   isRunning = true;
-  logWithTime("forecast-job", `start horizon=${horizon}`);
+  logWithTime("forecast-job", `start horizon=${horizon} cityId=${cityId}`);
 
   try {
-    const result = await runForecastPipeline(horizon);
+    const result = await runForecastPipeline(horizon, cityId);
 
     if ("runId" in result) {
       logWithTime(
@@ -58,11 +61,11 @@ export async function runForecastIngestionJob(horizon: ForecastHorizon = "tomorr
   }
 }
 
-async function runForecastBatch() {
+async function runForecastBatch(cityId = config.defaultCityId) {
   const horizons: ForecastHorizon[] = ["today", "tomorrow", "day2"];
   for (const horizon of horizons) {
     // sequential on purpose: shared lock + predictable order
-    await runForecastIngestionJob(horizon);
+    await runForecastIngestionJob(horizon, cityId);
   }
 }
 
@@ -87,7 +90,7 @@ export function startForecastScheduler() {
   cron.schedule(
     "*/10 * * * *",
     () => {
-      void refreshMarketSnapshots("current").then((result) => {
+      void refreshMarketSnapshots("current", config.defaultCityId).then((result) => {
         logWithTime(
           "market-snapshot",
           `refreshed type=${result.snapshotType} horizons=${result.horizonsProcessed}`,
@@ -101,7 +104,7 @@ export function startForecastScheduler() {
   cron.schedule(
     "0 18 * * *",
     () => {
-      void refreshMarketSnapshots("fixed_1800_msk").then((result) => {
+      void refreshMarketSnapshots("fixed_1800_msk", config.defaultCityId).then((result) => {
         logWithTime(
           "market-snapshot",
           `fixed snapshot saved type=${result.snapshotType} horizons=${result.horizonsProcessed}`,

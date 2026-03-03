@@ -161,24 +161,24 @@ router.get("/data.json", async (_req, res, next) => {
 
 router.get("/api/summary", async (req, res, next) => {
   try {
-    const { date } = apiSummaryQuerySchema.parse(req.query);
+    const { date, cityId } = apiSummaryQuerySchema.parse(req.query);
     const { start, end } = dayBounds(date);
 
     const [forecastRuns, marketCurrent, marketFixed, signals] = await Promise.all([
       prisma.forecastRun.findMany({
-        where: { targetDate: { gte: start, lte: end } },
+        where: { targetDate: { gte: start, lte: end }, cityId },
         include: { modelForecasts: true, consensuses: true },
         orderBy: { createdAt: "desc" },
       }),
       prisma.marketSnapshot.findFirst({
-        where: { targetDate: { gte: start, lte: end }, snapshotType: "current" },
+        where: { targetDate: { gte: start, lte: end }, snapshotType: "current", cityId },
         orderBy: { snapshotTimeUtc: "desc" },
       }),
       prisma.marketSnapshot.findFirst({
-        where: { targetDate: { gte: start, lte: end }, snapshotType: "fixed_1800_msk" },
+        where: { targetDate: { gte: start, lte: end }, snapshotType: "fixed_1800_msk", cityId },
         orderBy: { snapshotTimeUtc: "desc" },
       }),
-      prisma.edgeSignal.findMany({ where: { targetDate: { gte: start, lte: end } } }),
+      prisma.edgeSignal.findMany({ where: { targetDate: { gte: start, lte: end }, cityId } }),
     ]);
 
     const payload = {
@@ -206,11 +206,11 @@ router.get("/api/summary", async (req, res, next) => {
 
 router.get("/api/runs", async (req, res, next) => {
   try {
-    const { date } = runsQuerySchema.parse(req.query);
+    const { date, cityId } = runsQuerySchema.parse(req.query);
     const { start, end } = dayBounds(date);
 
     const runs = await prisma.forecastRun.findMany({
-      where: { targetDate: { gte: start, lte: end } },
+      where: { targetDate: { gte: start, lte: end }, cityId },
       include: {
         _count: {
           select: { modelForecasts: true, consensuses: true, edgeSignals: true },
@@ -227,13 +227,14 @@ router.get("/api/runs", async (req, res, next) => {
 
 router.get("/api/market", async (req, res, next) => {
   try {
-    const { date, type } = marketQuerySchema.parse(req.query);
+    const { date, type, cityId } = marketQuerySchema.parse(req.query);
     const { start, end } = dayBounds(date);
 
     const items = await prisma.marketSnapshot.findMany({
       where: {
         targetDate: { gte: start, lte: end },
         snapshotType: type,
+        cityId,
       },
       orderBy: { snapshotTimeUtc: "desc" },
     });
@@ -246,11 +247,11 @@ router.get("/api/market", async (req, res, next) => {
 
 router.get("/api/signals", async (req, res, next) => {
   try {
-    const { date } = signalsQuerySchema.parse(req.query);
+    const { date, cityId } = signalsQuerySchema.parse(req.query);
     const { start, end } = dayBounds(date);
 
     const items = await prisma.edgeSignal.findMany({
-      where: { targetDate: { gte: start, lte: end } },
+      where: { targetDate: { gte: start, lte: end }, cityId },
       orderBy: { edge: "desc" },
     });
 
@@ -262,8 +263,8 @@ router.get("/api/signals", async (req, res, next) => {
 
 router.get("/api/backtest", async (req, res, next) => {
   try {
-    const { from, to } = backtestQuerySchema.parse(req.query);
-    const result = await runBacktest(from, to);
+    const { from, to, cityId } = backtestQuerySchema.parse(req.query);
+    const result = await runBacktest(from, to, cityId);
     res.json(result);
   } catch (error) {
     next(error);
@@ -276,11 +277,11 @@ router.get("/api/backtest", async (req, res, next) => {
  */
 router.get("/api/evolution", async (req, res, next) => {
   try {
-    const { date } = evolutionQuerySchema.parse(req.query);
+    const { date, cityId } = evolutionQuerySchema.parse(req.query);
     const { start, end } = dayBounds(date);
 
     const runs = await prisma.forecastRun.findMany({
-      where: { targetDate: { gte: start, lte: end } },
+      where: { targetDate: { gte: start, lte: end }, cityId },
       include: { consensuses: true },
       orderBy: { createdAt: "asc" },
     });
@@ -337,7 +338,7 @@ router.get("/api/evolution", async (req, res, next) => {
  */
 router.get("/api/model-quality", async (req, res, next) => {
   try {
-    const { windowDays } = modelQualityQuerySchema.parse(req.query);
+    const { windowDays, cityId } = modelQualityQuerySchema.parse(req.query);
     const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
     // Get the Monday of the week containing `since`
     const d = new Date(since);
@@ -346,7 +347,7 @@ router.get("/api/model-quality", async (req, res, next) => {
     d.setUTCHours(0, 0, 0, 0);
 
     const weights = await prisma.weeklyModelWeight.findMany({
-      where: { weekStartDate: { gte: d } },
+      where: { weekStartDate: { gte: d }, cityId },
       orderBy: [{ weekStartDate: "desc" }, { weight: "desc" }],
     });
 

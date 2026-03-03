@@ -13,6 +13,7 @@ model ForecastRun {
   runTimeMsk      DateTime
   targetDate      DateTime // только дата
   horizon         String   // today | tomorrow | day2
+  cityId          String   @default("nyc")
   createdAt       DateTime @default(now())
 
   modelForecasts ModelForecast[]
@@ -22,6 +23,7 @@ model ForecastRun {
   @@index([targetDate])
   @@index([createdAt])
   @@index([horizon])
+  @@index([cityId, targetDate])
 }
 
 model ModelForecast {
@@ -48,12 +50,15 @@ model MarketSnapshot {
   snapshotType    String   // current | fixed_1800_msk
   probsJson       String   // JSON string
   source          String
+  cityId          String   @default("nyc")
   createdAt       DateTime @default(now())
 
   @@index([targetDate])
   @@index([snapshotType])
   @@index([createdAt])
   @@index([targetDate, snapshotType])
+  @@index([cityId, targetDate])
+  @@index([cityId, targetDate, snapshotType])
 }
 
 model Consensus {
@@ -79,6 +84,7 @@ model EdgeSignal {
   edge           Float
   recommendation String  // bet | no_bet
   reason         String
+  cityId         String   @default("nyc")
   createdAt      DateTime @default(now())
 
   forecastRun ForecastRun @relation(fields: [forecastRunId], references: [id], onDelete: Cascade)
@@ -87,16 +93,20 @@ model EdgeSignal {
   @@index([targetDate])
   @@index([createdAt])
   @@index([forecastRunId, targetDate])
+  @@index([cityId, targetDate])
 }
 
 model ActualOutcome {
   id              String   @id @default(cuid())
-  targetDate      DateTime @unique
+  targetDate      DateTime
   winningRangeKey String
   source          String
+  cityId          String   @default("nyc")
   createdAt       DateTime @default(now())
 
+  @@unique([cityId, targetDate])
   @@index([targetDate])
+  @@index([cityId, targetDate])
 }
 
 model WeeklyModelWeight {
@@ -105,8 +115,10 @@ model WeeklyModelWeight {
   modelId       String
   weight        Float
   metricsJson   String
+  cityId        String   @default("nyc")
   createdAt     DateTime @default(now())
 
-  @@unique([weekStartDate, modelId])
+  @@unique([cityId, weekStartDate, modelId])
   @@index([weekStartDate])
+  @@index([cityId, weekStartDate])
 }

@@ -12,6 +12,7 @@ export type CreateForecastRunInput = {
   runTimeMsk: Date;
   targetDate: Date;
   horizon: string;
+  cityId: string;
 };
 
 export type CreateModelForecastInput = {
@@ -39,6 +40,7 @@ export type CreateEdgeSignalInput = {
   edge: number;
   recommendation: string;
   reason: string;
+  cityId: string;
 };
 
 export type CreateMarketSnapshotInput = {
@@ -47,6 +49,7 @@ export type CreateMarketSnapshotInput = {
   snapshotType: string;
   probsJson: Record<string, number>;
   source: string;
+  cityId: string;
 };
 
 export async function createForecastRun(input: CreateForecastRunInput, db: DbClient = prisma) {

@@ -7,6 +7,7 @@ export const runSchema = z.object({
   runTimeMsk: dateLike,
   targetDate: dateLike,
   horizon: z.enum(["today", "tomorrow", "day2"]),
+  cityId: z.string().default("nyc"),
 });
 
 export const modelForecastSchema = z.object({
@@ -39,6 +40,7 @@ export const marketSnapshotSchema = z.object({
   snapshotType: z.enum(["current", "fixed_1800_msk"]),
   probsJson: z.record(z.number()),
   source: z.string().min(1),
+  cityId: z.string().default("nyc"),
 });
 
 export const createForecastRunPayloadSchema = z.object({

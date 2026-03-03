@@ -1,5 +1,6 @@
 import { createMarketSnapshot } from "../db/forecastRepo.js";
 import type { ForecastHorizon } from "./forecastPipeline.service.js";
+import { config } from "../config/index.js";
 
 export type SnapshotType = "current" | "fixed_1800_msk";
 
@@ -16,7 +17,7 @@ function targetDateForHorizon(horizon: ForecastHorizon, now = new Date()) {
   return target;
 }
 
-export async function refreshMarketSnapshots(snapshotType: SnapshotType) {
+export async function refreshMarketSnapshots(snapshotType: SnapshotType, cityId = config.defaultCityId) {
   const horizons: ForecastHorizon[] = ["today", "tomorrow", "day2"];
 
   for (const horizon of horizons) {
@@ -41,6 +42,7 @@ export async function refreshMarketSnapshots(snapshotType: SnapshotType) {
         ge_54: 2,
       },
       source: "mock-polymarket-adapter",
+      cityId,
     });
   }
 
