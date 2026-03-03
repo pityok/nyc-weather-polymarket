@@ -130,8 +130,9 @@ export async function getForecastRunWithRelations(runId: string, db: DbClient = 
   };
 }
 
-export async function getLatestForecastRun(db: DbClient = prisma) {
+export async function getLatestForecastRun(cityId?: string, db: DbClient = prisma) {
   const run = await db.forecastRun.findFirst({
+    where: cityId ? { cityId } : undefined,
     orderBy: { createdAt: "desc" },
     include: {
       modelForecasts: true,
@@ -157,13 +158,16 @@ export async function getLatestForecastRun(db: DbClient = prisma) {
 }
 
 export async function listForecastRuns(
-  params: { limit: number; offset: number },
+  params: { limit: number; offset: number; cityId?: string },
   db: DbClient = prisma,
 ): Promise<{ items: ForecastRunListItemDto[]; limit: number; offset: number; total: number }> {
-  const { limit, offset } = params;
+  const { limit, offset, cityId } = params;
+
+  const where = cityId ? { cityId } : undefined;
 
   const [rows, total] = await Promise.all([
     db.forecastRun.findMany({
+      where,
       orderBy: { createdAt: "desc" },
       take: limit,
       skip: offset,
@@ -183,7 +187,7 @@ export async function listForecastRuns(
         },
       },
     }),
-    db.forecastRun.count(),
+    db.forecastRun.count({ where }),
   ]);
 
   const items: ForecastRunListItemDto[] = rows.map((row) => ({

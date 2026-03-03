@@ -7,9 +7,10 @@ import {
 import type { DashboardSnapshotQuery } from "../types/dashboardQuery.js";
 
 export async function buildDashboardSnapshot(query: DashboardSnapshotQuery) {
+  const cityId = query.cityId ?? "nyc";
   const run = query.runId
     ? await getForecastRunWithRelations(query.runId)
-    : await getLatestForecastRun();
+    : await getLatestForecastRun(cityId);
 
   if (!run) return null;
 
@@ -30,7 +31,7 @@ export async function buildDashboardSnapshot(query: DashboardSnapshotQuery) {
   };
 
   if (query.includeHistory) {
-    const history = await listForecastRuns({ limit: query.historyLimit, offset: 0 });
+    const history = await listForecastRuns({ limit: query.historyLimit, offset: 0, cityId });
     response.history = history.items;
   }
 

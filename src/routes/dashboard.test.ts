@@ -110,3 +110,26 @@ describe("dashboard snapshot API", () => {
     expect(res.body.history.length).toBe(1);
   });
 });
+
+
+describe("dashboard snapshot cityId", () => {
+  it("isolates history and latest between nyc and london", async () => {
+    const nyc = await request(app).post("/forecast-runs").send(basePayload);
+    const london = await request(app)
+      .post("/forecast-runs")
+      .send({
+        ...basePayload,
+        run: { ...basePayload.run, cityId: "london" },
+      });
+
+    const resNyc = await request(app).get("/dashboard/snapshot?includeHistory=true&historyLimit=5&cityId=nyc");
+    const resLondon = await request(app).get("/dashboard/snapshot?includeHistory=true&historyLimit=5&cityId=london");
+
+    expect(resNyc.status).toBe(200);
+    expect(resLondon.status).toBe(200);
+    expect(resNyc.body.run.id).toBe(nyc.body.runId);
+    expect(resLondon.body.run.id).toBe(london.body.runId);
+    expect(resNyc.body.history.every((r: any) => r.id === nyc.body.runId)).toBe(true);
+    expect(resLondon.body.history.every((r: any) => r.id === london.body.runId)).toBe(true);
+  });
+});

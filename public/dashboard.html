@@ -26,6 +26,9 @@
     <label style="margin-left:12px">Date (YYYY-MM-DD):
       <input id="date" />
     </label>
+    <label style="margin-left:12px">City:
+      <select id="citySelect"><option value="nyc">NYC</option><option value="london">London</option></select>
+    </label>
   </div>
 
   <div class="grid">
@@ -61,13 +64,13 @@ function todayYmd(){return new Date().toISOString().slice(0,10)}
 async function load(){
   const date = document.getElementById('date').value || todayYmd();
   const [summaryRes, signalsRes, marketCurRes, marketFixRes, snapRes, evolutionRes, qualityRes] = await Promise.all([
-    fetch(`/api/summary?date=${date}`),
-    fetch(`/api/signals?date=${date}`),
-    fetch(`/api/market?date=${date}&type=current`),
-    fetch(`/api/market?date=${date}&type=fixed_1800_msk`),
-    fetch(`/dashboard/snapshot?includeHistory=true&historyLimit=10`),
-    fetch(`/api/evolution?date=${date}`),
-    fetch(`/api/model-quality?windowDays=7`),
+    fetch(`/api/summary?date=${date}&cityId=${cityId}`),
+    fetch(`/api/signals?date=${date}&cityId=${cityId}`),
+    fetch(`/api/market?date=${date}&type=current&cityId=${cityId}`),
+    fetch(`/api/market?date=${date}&type=fixed_1800_msk&cityId=${cityId}`),
+    fetch(`/dashboard/snapshot?includeHistory=true&historyLimit=10&cityId=${cityId}`),
+    fetch(`/api/evolution?date=${date}&cityId=${cityId}`),
+    fetch(`/api/model-quality?windowDays=7&cityId=${cityId}`),
   ]);
   if(!summaryRes.ok){return}
   const summary = await summaryRes.json();

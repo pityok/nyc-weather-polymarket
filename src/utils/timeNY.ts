@@ -1,17 +1,21 @@
 const NY_TZ = "America/New_York";
 
-/**
- * Returns the current date in America/New_York timezone as YYYY-MM-DD.
- * This is the source of truth for targetDate/horizon calculations.
- * Handles DST automatically via Intl.DateTimeFormat.
- */
-export function currentDateNY(now = new Date()): string {
+/** Generic TZ helpers **/
+export function currentDateInTz(now = new Date(), timezone = NY_TZ): string {
   return new Intl.DateTimeFormat("sv-SE", {
-    timeZone: NY_TZ,
+    timeZone: timezone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
   }).format(now);
+}
+
+/**
+ * Returns the current date in America/New_York timezone as YYYY-MM-DD.
+ * Backwards-compatible wrapper around currentDateInTz.
+ */
+export function currentDateNY(now = new Date()): string {
+  return currentDateInTz(now, NY_TZ);
 }
 
 /**
@@ -25,20 +29,24 @@ export function addDays(ymd: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/**
- * Returns targetDate (YYYY-MM-DD) for the given forecast horizon in NY timezone.
- * today = current NY date, tomorrow = +1 day, day2 = +2 days.
- *
- * Fixes UTC-based horizon bug: e.g. at 23:50 NY (UTC already tomorrow),
- * the old UTC-based code returned wrong targetDate.
- */
-export function targetDateForHorizon(
-  horizon: "today" | "tomorrow" | "day2",
+export type Horizon = "today" | "tomorrow" | "day2";
+
+export function targetDateForHorizonInTz(
+  horizon: Horizon,
   now = new Date(),
+  timezone = NY_TZ,
 ): string {
-  const today = currentDateNY(now);
+  const today = currentDateInTz(now, timezone);
   const offsets: Record<string, number> = { today: 0, tomorrow: 1, day2: 2 };
   return addDays(today, offsets[horizon] ?? 0);
+}
+
+/** NY-specific wrapper kept for backwards compatibility. */
+export function targetDateForHorizon(
+  horizon: Horizon,
+  now = new Date(),
+): string {
+  return targetDateForHorizonInTz(horizon, now, NY_TZ);
 }
 
 /**

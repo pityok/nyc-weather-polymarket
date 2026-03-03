@@ -7,7 +7,7 @@ import { createForecastRunWithData } from "./forecastRun.service.js";
 import { computeEdgeRecommendation } from "./edge.service.js";
 import { computeModelWeights7d } from "./modelWeights.service.js";
 import { fetchWithRetry, RETRY_OPEN_METEO } from "../utils/fetchWithRetry.js";
-import { targetDateForHorizon, parseDateUTC } from "../utils/timeNY.js";
+import { targetDateForHorizonInTz, parseDateUTC } from "../utils/timeNY.js";
 import { getDefaultCity } from "../config/cities.js";
 import type { LLMForecastResult } from "../llm/types.js";
 
@@ -115,8 +115,8 @@ export async function gatherForecastPayload(
   now = new Date(),
   cityId = config.defaultCityId,
 ): Promise<CreateForecastRunPayload> {
-  // Use NY timezone as source of truth for targetDate/horizon (fixes UTC-based bug)
-  const targetDate = targetDateForHorizon(horizon, now);
+  const city = getDefaultCity(cityId);
+  const targetDate = targetDateForHorizonInTz(horizon, now, city.timezone);
   const target = parseDateUTC(targetDate);
 
   let modelForecasts: CreateForecastRunPayload["modelForecasts"] = [];

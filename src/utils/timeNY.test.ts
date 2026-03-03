@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { currentDateNY, targetDateForHorizon, addDays } from "./timeNY.js";
+import { currentDateNY, targetDateForHorizon, addDays, currentDateInTz, targetDateForHorizonInTz } from "./timeNY.js";
 
 // EST = UTC-5 (Nov–Mar before DST), EDT = UTC-4 (Mar–Nov after DST)
 // DST spring 2026: March 8, clocks spring 2:00 AM → 3:00 AM (EST→EDT)
@@ -123,5 +123,28 @@ describe("addDays", () => {
   it("addDays works during DST transition month", () => {
     expect(addDays("2026-03-07", 1)).toBe("2026-03-08");
     expect(addDays("2026-03-08", 1)).toBe("2026-03-09");
+  });
+});
+
+
+describe("time domain per-city (London vs NYC)", () => {
+  const LONDON_TZ = "Europe/London";
+
+  it("around midnight London winter (UTC)", () => {
+    // Jan 15 23:50 London (GMT) = 2026-01-15T23:50:00Z
+    const before = new Date("2026-01-15T23:50:00Z");
+    expect(currentDateInTz(before, LONDON_TZ)).toBe("2026-01-15");
+
+    // Jan 16 00:10 London = 2026-01-16T00:10:00Z
+    const after = new Date("2026-01-16T00:10:00Z");
+    expect(currentDateInTz(after, LONDON_TZ)).toBe("2026-01-16");
+  });
+
+  it("horizon uses city timezone (London)", () => {
+    // At 23:50 London, today=15, tomorrow=16, day2=17
+    const t = new Date("2026-01-15T23:50:00Z");
+    expect(targetDateForHorizonInTz("today", t, LONDON_TZ)).toBe("2026-01-15");
+    expect(targetDateForHorizonInTz("tomorrow", t, LONDON_TZ)).toBe("2026-01-16");
+    expect(targetDateForHorizonInTz("day2", t, LONDON_TZ)).toBe("2026-01-17");
   });
 });
