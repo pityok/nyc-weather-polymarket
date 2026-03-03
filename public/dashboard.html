@@ -5,16 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NYC Weather Polymarket Dashboard</title>
   <style>
-    body{font-family:Arial,sans-serif;margin:20px;background:#0b1020;color:#eaf0ff}
-    h1,h2{margin:8px 0}
+    body{font-family:Arial,sans-serif;margin:20px;background:#f4f7fb;color:#1c2434}
+    h1,h2{margin:8px 0;color:#1a2a4a}
     .grid{display:grid;grid-template-columns:repeat(2,minmax(320px,1fr));gap:12px}
-    .card{background:#131a2f;border:1px solid #253053;border-radius:10px;padding:12px}
+    .card{background:#fff;border:1px solid #dbe3f1;border-radius:10px;padding:12px;box-shadow:0 2px 8px rgba(31,45,85,.06)}
     table{width:100%;border-collapse:collapse;font-size:12px}
-    td,th{padding:6px;border-bottom:1px solid #253053;text-align:left;white-space:nowrap}
-    th{position:sticky;top:0;background:#162140}
+    td,th{padding:6px;border-bottom:1px solid #e7ecf5;text-align:left;white-space:nowrap}
+    th{position:sticky;top:0;background:#eef3fc;color:#26334d}
     .scroll-x{overflow-x:auto}
-    select,input{background:#0f1630;color:#fff;border:1px solid #33406a;padding:6px;border-radius:6px}
-    .muted{opacity:.8;font-size:12px}
+    select,input{background:#fff;color:#1c2434;border:1px solid #c7d3ea;padding:6px;border-radius:6px}
+    .muted{color:#5a6c8f;font-size:12px}
+    #reloadBtn{margin-left:12px;background:#2f6fed;color:#fff;border:1px solid #2f6fed;padding:6px 10px;border-radius:6px;cursor:pointer}
   </style>
 </head>
 <body>
@@ -22,13 +23,13 @@
   <div class="muted" id="updated"></div>
 
   <div class="card" style="margin:10px 0">
-    <label>Date (YYYY-MM-DD):
-      <input id="date" />
+    <label>Дата:
+      <select id="dateSelect"></select>
     </label>
     <label style="margin-left:12px">City:
       <select id="citySelect"><option value="nyc">NYC</option><option value="london">London</option><option value="ankara">Ankara</option></select>
     </label>
-    <button id="reloadBtn" style="margin-left:12px;background:#1b2b5e;color:#fff;border:1px solid #33406a;padding:6px 10px;border-radius:6px;cursor:pointer;">Обновить</button>
+    <button id="reloadBtn">Обновить</button>
   </div>
 
   <div class="grid">
@@ -83,6 +84,28 @@ const RANGE_COLS = [
 ];
 
 function todayYmd(){return new Date().toISOString().slice(0,10)}
+let dateOptionsReady = false;
+
+async function ensureDateOptions(){
+  if(dateOptionsReady) return;
+  const select = document.getElementById('dateSelect');
+  let dates = [];
+  try {
+    const res = await fetch('/data.json?t=' + Date.now());
+    if(res.ok){
+      const data = await res.json();
+      dates = Object.keys(data?.summary || {});
+    }
+  } catch {}
+
+  dates = Array.from(new Set(dates.filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)))).sort((a,b)=> b.localeCompare(a));
+  if(!dates.length) dates = [todayYmd()];
+
+  select.innerHTML = dates.map(d => `<option value="${d}">${d}</option>`).join('');
+  select.value = dates.includes(todayYmd()) ? todayYmd() : dates[0];
+  dateOptionsReady = true;
+}
+
 function parseJson(v){ if(!v) return {}; if(typeof v==='object') return v; try{return JSON.parse(v)}catch{return {}} }
 function num(v){ const n=Number(v); return Number.isFinite(n)?n:0 }
 function toRangeMap(raw){
@@ -144,7 +167,8 @@ function pickMarketAtRequest(marketItems, runTimeUtc){
 }
 
 async function load(){
-  const date = document.getElementById('date').value || todayYmd();
+  await ensureDateOptions();
+  const date = document.getElementById('dateSelect').value || todayYmd();
   const cityId = document.getElementById('citySelect').value || 'nyc';
 
   const [summaryRes, signalsRes, marketCurRes, marketFixRes, marketNativeRes, runsRes, snapRes, evolutionRes, qualityRes] = await Promise.all([
@@ -285,10 +309,9 @@ async function load(){
     ((snap.history||[]).length ? (snap.history||[]).map(r=>`<tr><td>${String(r.id).slice(0,8)}</td><td>${r.horizon||''}</td><td>${String(r.targetDate).slice(0,10)}</td><td>${String(r.createdAt||'').slice(0,19).replace('T',' ')}</td></tr>`).join('') : '<tr><td colspan="4" class="muted">Нет истории</td></tr>');
 }
 
-document.getElementById('date').value=todayYmd();
 document.getElementById('reloadBtn').addEventListener('click', load);
 document.getElementById('citySelect').addEventListener('change', load);
-document.getElementById('date').addEventListener('change', load);
+document.getElementById('dateSelect').addEventListener('change', load);
 load();
 setInterval(load, 60000);
 </script>
