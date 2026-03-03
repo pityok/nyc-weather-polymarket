@@ -101,22 +101,30 @@ function topRange(probs){
 }
 function fmt(n){ return Number(num(n).toFixed(2)); }
 
+function isHealthyMarketSnapshot(item){
+  const src = String(item?.source || '').toLowerCase();
+  if(!src) return false;
+  if(src.startsWith('mock-')) return false;
+  if(src.includes('market-disabled')) return false;
+  if(src.includes('status=degraded') || src.includes('status=failed')) return false;
+  if(src.includes('status=healthy')) return true;
+  // fallback for old rows without explicit status marker
+  return src.includes('gamma-api.polymarket.com');
+}
+
 function pickMarketAtRequest(marketItems, runTimeUtc){
   if(!runTimeUtc || !Array.isArray(marketItems) || marketItems.length===0) return null;
   const rt = new Date(runTimeUtc).getTime();
   let bestPast = null;
   let bestPastTs = -Infinity;
-  let bestAny = null;
-  let bestAnyDist = Infinity;
   for(const m of marketItems){
     const ts = new Date(m.snapshotTimeUtc).getTime();
-    if(Number.isFinite(ts)){
-      const d = Math.abs(rt - ts);
-      if(d < bestAnyDist){ bestAnyDist = d; bestAny = m; }
-      if(ts <= rt && ts > bestPastTs){ bestPastTs = ts; bestPast = m; }
+    if(Number.isFinite(ts) && ts <= rt && ts > bestPastTs){
+      bestPastTs = ts;
+      bestPast = m;
     }
   }
-  return bestPast || bestAny;
+  return bestPast;
 }
 
 async function load(){
@@ -163,9 +171,12 @@ async function load(){
     .filter(f => !latestRunId || f.forecastRunId === latestRunId)
     .sort((a,b)=> (a.modelName || '').localeCompare(b.modelName || ''));
 
-  const marketNow = (marketCur.items || [])[0] || null;
-  const marketFixed = (marketFix.items || [])[0] || null;
-  const marketAtRequest = pickMarketAtRequest(marketCur.items || [], latestRunUtc);
+  const healthyCurrentItems = (marketCur.items || []).filter(isHealthyMarketSnapshot);
+  const healthyFixedItems = (marketFix.items || []).filter(isHealthyMarketSnapshot);
+
+  const marketNow = healthyCurrentItems[0] || null;
+  const marketFixed = healthyFixedItems[0] || null;
+  const marketAtRequest = pickMarketAtRequest(healthyCurrentItems, latestRunUtc);
 
   document.getElementById('updated').innerText = `Last updated UTC: ${new Date().toISOString()} | MSK: ${new Date().toLocaleString('sv-SE',{timeZone:'Europe/Moscow'})}`;
 
@@ -174,9 +185,9 @@ async function load(){
     <tr><td>Date / City</td><td>${date} / ${cityId}</td></tr>
     <tr><td>Latest run</td><td>${latestRunId ? latestRunId.slice(0,8) : '—'}</td></tr>
     <tr><td>Run time UTC</td><td>${latestRunUtc || '—'}</td></tr>
-    <tr><td>Market now</td><td>${marketNow ? 'yes' : 'no'}</td></tr>
-    <tr><td>Market at request</td><td>${marketAtRequest ? 'yes' : 'no'}</td></tr>
-    <tr><td>Market 18:00 MSK</td><td>${marketFixed ? 'yes' : 'no'}</td></tr>
+    <tr><td>Market now (healthy)</td><td>${marketNow ? (marketNow.snapshotTimeUtc || 'yes') : 'no'}</td></tr>
+    <tr><td>Market at request (healthy, <= run time)</td><td>${marketAtRequest ? (marketAtRequest.snapshotTimeUtc || 'yes') : 'no'}</td></tr>
+    <tr><td>Market 18:00 MSK (healthy)</td><td>${marketFixed ? (marketFixed.snapshotTimeUtc || 'yes') : 'no'}</td></tr>
     <tr><td>Model forecasts (latest run)</td><td>${latestRunForecasts.length}</td></tr>
     <tr><td>Signals total</td><td>${(signals.items||[]).length}</td></tr>`;
 
@@ -194,9 +205,24 @@ async function load(){
   }
 
   if(consensus) row(`Consensus (${consensus.method||'unknown'})`, consensus.probsJson, consensus.createdAt || '');
-  if(marketAtRequest) row('Polymarket на момент запроса', marketAtRequest.probsJson, `${marketAtRequest.snapshotTimeUtc || ''}`);
-  if(marketNow) row('Polymarket сейчас', marketNow.probsJson, `${marketNow.snapshotTimeUtc || ''}`);
-  if(marketFixed) row('Polymarket в 18:00 MSK', marketFixed.probsJson, `${marketFixed.snapshotTimeUtc || ''}`);
+
+  if(marketAtRequest) {
+    row('Polymarket на момент запроса', marketAtRequest.probsJson, `${marketAtRequest.snapshotTimeUtc || ''}`);
+  } else {
+    rows.push(`<tr><td><strong>Polymarket на момент запроса</strong><div class="muted">нет healthy snapshot в БД на/до времени run</div></td>${'<td>—</td>'.repeat(RANGE_COLS.length)}<td>—</td></tr>`);
+  }
+
+  if(marketNow) {
+    row('Polymarket сейчас', marketNow.probsJson, `${marketNow.snapshotTimeUtc || ''}`);
+  } else {
+    rows.push(`<tr><td><strong>Polymarket сейчас</strong><div class="muted">нет healthy snapshot в БД</div></td>${'<td>—</td>'.repeat(RANGE_COLS.length)}<td>—</td></tr>`);
+  }
+
+  if(marketFixed) {
+    row('Polymarket в 18:00 MSK', marketFixed.probsJson, `${marketFixed.snapshotTimeUtc || ''}`);
+  } else {
+    rows.push(`<tr><td><strong>Polymarket в 18:00 MSK</strong><div class="muted">нет healthy fixed snapshot (в БД только mock/degraded)</div></td>${'<td>—</td>'.repeat(RANGE_COLS.length)}<td>—</td></tr>`);
+  }
 
   for(const f of latestRunForecasts){
     row(`Model: ${f.modelName || f.modelId}`, f.probsJson, `${f.modelId || ''}`);
@@ -204,7 +230,7 @@ async function load(){
 
   const head = RANGE_COLS.map(([,label])=>`<th>${label}</th>`).join('');
   document.getElementById('probMatrix').innerHTML = `<tr><th>Источник</th>${head}<th>Top</th></tr>` + (rows.join('') || '<tr><td colspan="14" class="muted">Нет данных</td></tr>');
-  document.getElementById('probMeta').innerText = `Показываются ВСЕ диапазоны вероятностей, не только top.`;
+  document.getElementById('probMeta').innerText = `Показываются ВСЕ диапазоны вероятностей, не только top. Для строк Polymarket учитываются только healthy snapshots (mock/degraded скрыты).`;
 
   // Evolution
   const versions = evolution.versions || [];
