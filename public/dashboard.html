@@ -7,10 +7,12 @@
   <style>
     body{font-family:Arial,sans-serif;margin:20px;background:#0b1020;color:#eaf0ff}
     h1,h2{margin:8px 0}
-    .grid{display:grid;grid-template-columns:repeat(2,minmax(280px,1fr));gap:12px}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(320px,1fr));gap:12px}
     .card{background:#131a2f;border:1px solid #253053;border-radius:10px;padding:12px}
-    table{width:100%;border-collapse:collapse}
-    td,th{padding:6px;border-bottom:1px solid #253053;text-align:left}
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    td,th{padding:6px;border-bottom:1px solid #253053;text-align:left;white-space:nowrap}
+    th{position:sticky;top:0;background:#162140}
+    .scroll-x{overflow-x:auto}
     select,input{background:#0f1630;color:#fff;border:1px solid #33406a;padding:6px;border-radius:6px}
     .muted{opacity:.8;font-size:12px}
   </style>
@@ -20,56 +22,113 @@
   <div class="muted" id="updated"></div>
 
   <div class="card" style="margin:10px 0">
-    <label>Horizon:
-      <select id="horizon"><option>today</option><option selected>tomorrow</option><option>day2</option></select>
-    </label>
-    <label style="margin-left:12px">Date (YYYY-MM-DD):
+    <label>Date (YYYY-MM-DD):
       <input id="date" />
     </label>
     <label style="margin-left:12px">City:
-      <select id="citySelect"><option value="nyc">NYC</option><option value="london">London</option></select>
+      <select id="citySelect"><option value="nyc">NYC</option><option value="london">London</option><option value="ankara">Ankara</option></select>
     </label>
+    <button id="reloadBtn" style="margin-left:12px;background:#1b2b5e;color:#fff;border:1px solid #33406a;padding:6px 10px;border-radius:6px;cursor:pointer;">Обновить</button>
   </div>
 
   <div class="grid">
-    <div class="card">
-      <h2>Сводная таблица</h2>
-      <table id="summaryTable"></table>
+    <div class="card" style="grid-column:1 / -1">
+      <h2>Матрица вероятностей (%): модели + рынок + консенсус</h2>
+      <div class="muted" id="probMeta"></div>
+      <div class="scroll-x">
+        <table id="probMatrix"></table>
+      </div>
     </div>
+
     <div class="card">
       <h2>Топ BET сигналов</h2>
       <table id="betsTable"></table>
     </div>
+
     <div class="card">
-      <h2>Карточки моделей</h2>
-      <div id="models"></div>
+      <h2>Сводка</h2>
+      <table id="summaryTable"></table>
     </div>
-    <div class="card">
-      <h2>История run</h2>
-      <table id="history"></table>
-    </div>
+
     <div class="card">
       <h2>Эволюция прогноза</h2>
       <div class="muted" id="evolutionMeta"></div>
       <table id="evolutionTable"></table>
     </div>
+
     <div class="card">
       <h2>Качество моделей (7d)</h2>
       <table id="qualityTable"></table>
     </div>
+
+    <div class="card">
+      <h2>История run</h2>
+      <table id="history"></table>
+    </div>
   </div>
 
 <script>
+const RANGE_COLS = [
+  ['le_33','≤33'],['r_34_35','34-35'],['r_36_37','36-37'],['r_38_39','38-39'],
+  ['r_40_41','40-41'],['r_42_43','42-43'],['r_44_45','44-45'],['r_46_47','46-47'],
+  ['r_48_49','48-49'],['r_50_51','50-51'],['r_52_53','52-53'],['ge_54','54+']
+];
+
 function todayYmd(){return new Date().toISOString().slice(0,10)}
+function parseJson(v){ if(!v) return {}; if(typeof v==='object') return v; try{return JSON.parse(v)}catch{return {}} }
+function num(v){ const n=Number(v); return Number.isFinite(n)?n:0 }
+function toRangeMap(raw){
+  const p = parseJson(raw);
+  return {
+    le_33: num(p.le_33 ?? p['33-']),
+    r_34_35: num(p.r_34_35 ?? p['34-35']),
+    r_36_37: num(p.r_36_37 ?? p['36-37']),
+    r_38_39: num(p.r_38_39 ?? p['38-39']),
+    r_40_41: num(p.r_40_41 ?? p['40-41']),
+    r_42_43: num(p.r_42_43 ?? p['42-43']),
+    r_44_45: num(p.r_44_45 ?? p['44-45']),
+    r_46_47: num(p.r_46_47 ?? p['46-47']),
+    r_48_49: num(p.r_48_49 ?? p['48-49'] ?? p['48+']),
+    r_50_51: num(p.r_50_51),
+    r_52_53: num(p.r_52_53),
+    ge_54: num(p.ge_54 ?? p['54+']),
+  }
+}
+function topRange(probs){
+  const entries = RANGE_COLS.map(([k,l])=>[l, num(probs[k])]);
+  entries.sort((a,b)=>b[1]-a[1]);
+  return entries[0]?.[0] || '-';
+}
+function fmt(n){ return Number(num(n).toFixed(2)); }
+
+function pickMarketAtRequest(marketItems, runTimeUtc){
+  if(!runTimeUtc || !Array.isArray(marketItems) || marketItems.length===0) return null;
+  const rt = new Date(runTimeUtc).getTime();
+  let bestPast = null;
+  let bestPastTs = -Infinity;
+  let bestAny = null;
+  let bestAnyDist = Infinity;
+  for(const m of marketItems){
+    const ts = new Date(m.snapshotTimeUtc).getTime();
+    if(Number.isFinite(ts)){
+      const d = Math.abs(rt - ts);
+      if(d < bestAnyDist){ bestAnyDist = d; bestAny = m; }
+      if(ts <= rt && ts > bestPastTs){ bestPastTs = ts; bestPast = m; }
+    }
+  }
+  return bestPast || bestAny;
+}
+
 async function load(){
   const date = document.getElementById('date').value || todayYmd();
   const cityId = document.getElementById('citySelect').value || 'nyc';
 
-  const [summaryRes, signalsRes, marketCurRes, marketFixRes, snapRes, evolutionRes, qualityRes] = await Promise.all([
+  const [summaryRes, signalsRes, marketCurRes, marketFixRes, runsRes, snapRes, evolutionRes, qualityRes] = await Promise.all([
     fetch(`/api/summary?date=${date}&cityId=${cityId}`),
     fetch(`/api/signals?date=${date}&cityId=${cityId}`),
     fetch(`/api/market?date=${date}&type=current&cityId=${cityId}`),
     fetch(`/api/market?date=${date}&type=fixed_1800_msk&cityId=${cityId}`),
+    fetch(`/api/runs?date=${date}&cityId=${cityId}`),
     fetch(`/dashboard/snapshot?includeHistory=true&historyLimit=10&cityId=${cityId}`),
     fetch(`/api/evolution?date=${date}&cityId=${cityId}`),
     fetch(`/api/model-quality?windowDays=7&cityId=${cityId}`),
@@ -79,55 +138,101 @@ async function load(){
     document.getElementById('updated').innerText = `Ошибка загрузки summary (${summaryRes.status})`;
     return;
   }
+
   const summary = await summaryRes.json();
-  const signals = await signalsRes.json();
-  const marketCur = await marketCurRes.json();
-  const marketFix = await marketFixRes.json();
-  const snap = await snapRes.json();
+  const signals = signalsRes.ok ? await signalsRes.json() : {items:[]};
+  const marketCur = marketCurRes.ok ? await marketCurRes.json() : {items:[]};
+  const marketFix = marketFixRes.ok ? await marketFixRes.json() : {items:[]};
+  const runs = runsRes.ok ? await runsRes.json() : {items:[]};
+  const snap = snapRes.ok ? await snapRes.json() : {history:[]};
   const evolution = evolutionRes.ok ? await evolutionRes.json() : { versions: [], deltas: [] };
   const quality = qualityRes.ok ? await qualityRes.json() : { models: [] };
 
+  const latestRun = (runs.items || [])[0] || null;
+  const latestRunId = latestRun?.id || null;
+  const latestRunUtc = latestRun?.runTimeUtc || null;
+
+  const latestConsensusRaw = (summary.consensus || [])
+    .filter(c => !latestRunId || c.forecastRunId === latestRunId)
+    .sort((a,b)=> (a.createdAt < b.createdAt ? 1 : -1));
+  const weighted = latestConsensusRaw.find(c => c.method === 'weighted');
+  const simple = latestConsensusRaw.find(c => c.method === 'simple');
+  const consensus = weighted || simple || latestConsensusRaw[0] || null;
+
+  const latestRunForecasts = (summary.forecasts || [])
+    .filter(f => !latestRunId || f.forecastRunId === latestRunId)
+    .sort((a,b)=> (a.modelName || '').localeCompare(b.modelName || ''));
+
+  const marketNow = (marketCur.items || [])[0] || null;
+  const marketFixed = (marketFix.items || [])[0] || null;
+  const marketAtRequest = pickMarketAtRequest(marketCur.items || [], latestRunUtc);
+
   document.getElementById('updated').innerText = `Last updated UTC: ${new Date().toISOString()} | MSK: ${new Date().toLocaleString('sv-SE',{timeZone:'Europe/Moscow'})}`;
 
-  const cur = marketCur.items?.[0]; const fix = marketFix.items?.[0];
-  document.getElementById('summaryTable').innerHTML = `<tr><th>Источник</th><th>Есть данные</th></tr>
-    <tr><td>Рынок сейчас</td><td>${cur ? 'yes' : 'no'}</td></tr>
-    <tr><td>Рынок 18:00 MSK</td><td>${fix ? 'yes' : 'no'}</td></tr>
-    <tr><td>Consensus AI</td><td>${summary.consensus?.length || 0}</td></tr>
-    <tr><td>Signals</td><td>${summary.signals?.length || 0}</td></tr>`;
+  // Summary
+  document.getElementById('summaryTable').innerHTML = `<tr><th>Параметр</th><th>Значение</th></tr>
+    <tr><td>Date / City</td><td>${date} / ${cityId}</td></tr>
+    <tr><td>Latest run</td><td>${latestRunId ? latestRunId.slice(0,8) : '—'}</td></tr>
+    <tr><td>Run time UTC</td><td>${latestRunUtc || '—'}</td></tr>
+    <tr><td>Market now</td><td>${marketNow ? 'yes' : 'no'}</td></tr>
+    <tr><td>Market at request</td><td>${marketAtRequest ? 'yes' : 'no'}</td></tr>
+    <tr><td>Market 18:00 MSK</td><td>${marketFixed ? 'yes' : 'no'}</td></tr>
+    <tr><td>Model forecasts (latest run)</td><td>${latestRunForecasts.length}</td></tr>
+    <tr><td>Signals total</td><td>${(signals.items||[]).length}</td></tr>`;
 
+  // Bets
   const bets = (signals.items||[]).filter(s=>s.recommendation==='bet').sort((a,b)=>b.edge-a.edge).slice(0,10);
-  document.getElementById('betsTable').innerHTML = `<tr><th>Range</th><th>Edge</th><th>AI</th><th>Market</th></tr>` +
-    bets.map(b=>`<tr><td>${b.rangeKey}</td><td>${b.edge.toFixed(2)}</td><td>${b.aiProb.toFixed(2)}</td><td>${b.marketProb.toFixed(2)}</td></tr>`).join('');
+  document.getElementById('betsTable').innerHTML = `<tr><th>Range</th><th>Edge</th><th>AI</th><th>Market</th><th>Reason</th></tr>` +
+    (bets.length ? bets.map(b=>`<tr><td>${b.rangeKey}</td><td>${fmt(b.edge)}</td><td>${fmt(b.aiProb)}</td><td>${fmt(b.marketProb)}</td><td>${b.reason||''}</td></tr>`).join('') : '<tr><td colspan="5" class="muted">Нет bet сигналов</td></tr>');
 
-  const forecasts = summary.forecasts || [];
-  const grouped = {};
-  forecasts.forEach(f=>{grouped[f.modelName]=grouped[f.modelName]||0; grouped[f.modelName]++});
-  document.getElementById('models').innerHTML = Object.keys(grouped).map(k=>`<div>${k}: ${grouped[k]} прогноз(ов)</div>`).join('') || 'Нет данных';
+  // Probability matrix
+  const rows = [];
+  function row(label, probsRaw, meta=''){
+    const p = toRangeMap(probsRaw);
+    const cols = RANGE_COLS.map(([k])=>`<td>${fmt(p[k])}</td>`).join('');
+    rows.push(`<tr><td><strong>${label}</strong><div class="muted">${meta}</div></td>${cols}<td><strong>${topRange(p)}</strong></td></tr>`);
+  }
 
-  document.getElementById('history').innerHTML = `<tr><th>ID</th><th>Horizon</th><th>Target</th></tr>` +
-    (snap.history||[]).map(r=>`<tr><td>${r.id.slice(0,8)}</td><td>${r.horizon}</td><td>${String(r.targetDate).slice(0,10)}</td></tr>`).join('');
+  if(consensus) row(`Consensus (${consensus.method||'unknown'})`, consensus.probsJson, consensus.createdAt || '');
+  if(marketAtRequest) row('Polymarket на момент запроса', marketAtRequest.probsJson, `${marketAtRequest.snapshotTimeUtc || ''}`);
+  if(marketNow) row('Polymarket сейчас', marketNow.probsJson, `${marketNow.snapshotTimeUtc || ''}`);
+  if(marketFixed) row('Polymarket в 18:00 MSK', marketFixed.probsJson, `${marketFixed.snapshotTimeUtc || ''}`);
 
-  // Evolution block: versions + deltas
+  for(const f of latestRunForecasts){
+    row(`Model: ${f.modelName || f.modelId}`, f.probsJson, `${f.modelId || ''}`);
+  }
+
+  const head = RANGE_COLS.map(([,label])=>`<th>${label}</th>`).join('');
+  document.getElementById('probMatrix').innerHTML = `<tr><th>Источник</th>${head}<th>Top</th></tr>` + (rows.join('') || '<tr><td colspan="14" class="muted">Нет данных</td></tr>');
+  document.getElementById('probMeta').innerText = `Показываются ВСЕ диапазоны вероятностей, не только top.`;
+
+  // Evolution
   const versions = evolution.versions || [];
   const deltas = evolution.deltas || [];
   document.getElementById('evolutionMeta').innerText = `Версий: ${versions.length} | Дельт: ${deltas.length}`;
   document.getElementById('evolutionTable').innerHTML =
     `<tr><th>#</th><th>MSK</th><th>Horizon</th><th>Top</th><th>Δtop</th></tr>` +
-    versions.map((v,i)=>{
+    (versions.length ? versions.map((v,i)=>{
       const delta = deltas[i-1];
       const topChanged = delta && delta.topRangeChanged ? `⬅ ${delta.topRangePrev}` : '';
-      return `<tr><td>${i}</td><td>${v.requestDatetimeMsk||''}</td><td>${v.horizon}</td><td>${v.topRange||'?'}</td><td class="muted">${topChanged}</td></tr>`;
-    }).join('') || '<tr><td colspan="5" class="muted">Нет данных</td></tr>';
+      return `<tr><td>${i}</td><td>${v.requestDatetimeMsk||''}</td><td>${v.horizon||''}</td><td>${v.topRange||'?'}</td><td class="muted">${topChanged}</td></tr>`;
+    }).join('') : '<tr><td colspan="5" class="muted">Нет данных</td></tr>');
 
-  // Quality scoreboard
+  // Quality
   const qModels = quality.models || [];
   document.getElementById('qualityTable').innerHTML =
     `<tr><th>Model</th><th>Week</th><th>Weight%</th><th>HitRate</th><th>Brier</th></tr>` +
-    qModels.map(m=>`<tr><td>${m.modelId}</td><td>${m.weekStartDate||''}</td><td>${m.weight.toFixed(2)}</td><td>${m.metrics?.hitRate!=null?(m.metrics.hitRate*100).toFixed(1)+'%':'—'}</td><td>${m.metrics?.brierScore!=null?m.metrics.brierScore.toFixed(4):'—'}</td></tr>`).join('') ||
-    '<tr><td colspan="5" class="muted">Нет данных (запустите backtest)</td></tr>';
+    (qModels.length ? qModels.map(m=>`<tr><td>${m.modelId}</td><td>${m.weekStartDate||''}</td><td>${fmt(m.weight)}</td><td>${m.metrics?.hitRate!=null?(m.metrics.hitRate*100).toFixed(1)+'%':'—'}</td><td>${m.metrics?.brierScore!=null?Number(m.metrics.brierScore).toFixed(4):'—'}</td></tr>`).join('') : '<tr><td colspan="5" class="muted">Нет данных</td></tr>');
+
+  // History
+  document.getElementById('history').innerHTML = `<tr><th>ID</th><th>Horizon</th><th>Target</th><th>Created</th></tr>` +
+    ((snap.history||[]).length ? (snap.history||[]).map(r=>`<tr><td>${String(r.id).slice(0,8)}</td><td>${r.horizon||''}</td><td>${String(r.targetDate).slice(0,10)}</td><td>${String(r.createdAt||'').slice(0,19).replace('T',' ')}</td></tr>`).join('') : '<tr><td colspan="4" class="muted">Нет истории</td></tr>');
 }
+
 document.getElementById('date').value=todayYmd();
+document.getElementById('reloadBtn').addEventListener('click', load);
+document.getElementById('citySelect').addEventListener('change', load);
+document.getElementById('date').addEventListener('change', load);
 load();
 setInterval(load, 60000);
 </script>
