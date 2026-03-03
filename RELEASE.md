@@ -201,3 +201,21 @@ Before any deploy:
 - [ ] `QUALITY_GATE_REQUIRED` decision made (default: `false`)
 - [ ] DB backup taken before deploy
 - [ ] Smoke suite passed after deploy
+
+---
+
+## 8. City-specific smoke (example: Ankara)
+
+Проверка API и dashboard для города Ankara (`cityId=ankara`). Подставьте актуальную дату и базовый URL.
+
+```bash
+BASE="http://localhost:3000"
+DATE="2026-03-15"
+
+curl -s "${BASE}/api/summary?date=${DATE}&cityId=ankara" | jq .
+curl -s "${BASE}/api/evolution?date=${DATE}&cityId=ankara" | jq .
+curl -s "${BASE}/api/signals?date=${DATE}&cityId=ankara" | jq .
+curl -s "${BASE}/dashboard/snapshot?cityId=ankara" | jq .
+```
+
+**При отсутствии market IDs для даты/города:** ответ должен содержать **status: `degraded`**, **recommendation: `no_bet`**, в **reason** — явная причина. Mock/fake рыночные данные не допускаются.

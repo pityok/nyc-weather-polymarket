@@ -70,15 +70,19 @@ npm run dev           # запуск в режиме разработки
 
 Система НЕ использует substring matching. Маркет привязывается по стабильному ID.
 
-Настройка через `POLYMARKET_MARKET_IDS` (JSON):
+Настройка через `POLYMARKET_MARKET_IDS` (JSON). Ключ: **`YYYY-MM-DD:cityId`** (дата и город). Значение: `conditionId` или `slug`.
+
 ```json
 {
-  "2026-03-15": { "conditionId": "0xabc..." },
-  "2026-03-16": { "slug": "highest-temperature-in-nyc-march-16" }
+  "2026-03-15:nyc": "0xabc...",
+  "2026-03-16:nyc": "0xdef...",
+  "2026-03-15:london": "0x...",
+  "2026-03-15:ankara": "0x...",
+  "2026-03-16:ankara": "0x..."
 }
 ```
 
-Если дата не зарегистрирована → `status: degraded`, `no_bet`. Никаких mock-значений.
+Если дата (и город) не зарегистрированы → `status: degraded`, `recommendation: no_bet`. Никаких mock-значений.
 
 ---
 
@@ -205,9 +209,18 @@ london: {
 
 ---
 
-## Time domain
+## Onboarding Ankara
 
-- **Источник истины**: America/New_York timezone для расчёта targetDate/horizon
-- **Хранение**: UTC midnight (`T00:00:00.000Z`)
-- **Логи**: UTC + MSK для отображения
-- **DST**: обрабатывается автоматически через `Intl.DateTimeFormat`
+Город **Ankara** уже в реестре городов (multi-city).
+
+- **cityId:** `ankara`
+- **Timezone:** `Europe/Istanbul`
+- **Market slug prefix:** для температурного рынка Анкары — `marketResolverConfig.defaultSlugPrefix` (например `highest-temperature-in-ankara`).
+
+Маппинг рынков по городу и дате: ключ в формате **`YYYY-MM-DD:cityId`** (пример для Ankara: `2026-03-15:ankara`). Пример `POLYMARKET_MARKET_IDS` с NYC, London и Ankara см. в [.env.example](./.env.example).
+
+**Контракт при отсутствии market ID:** если для пары дата+cityId запись в `POLYMARKET_MARKET_IDS` отсутствует → **status:** `degraded`, **recommendation:** `no_bet`, в **reason** — явная причина. Никаких mock/fake рыночных данных.
+
+---
+
+## Time domain
