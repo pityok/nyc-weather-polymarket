@@ -8,6 +8,9 @@ type NativeBin = {
   yesProb: number;
   noProb: number;
   question: string;
+  unit: "F" | "C";
+  minF: number | null;
+  maxF: number | null;
 };
 
 export type PolymarketNativeResult = {
@@ -45,28 +48,46 @@ function toF(value: number, unit: "f" | "c"): number {
   return (value * 9) / 5 + 32;
 }
 
-function parseQuestionToBin(question: string): { key: string; label: string; order: number } | null {
+function parseQuestionToBin(question: string): { key: string; label: string; order: number; unit: "F" | "C"; minF: number | null; maxF: number | null } | null {
   const q = question.toLowerCase().replace(/º/g, "°");
 
   const below = q.match(/be\s+(-?\d+(?:\.\d+)?)\s*°?\s*([fc])\s*or below/);
   if (below) {
-    const maxF = Math.round(toF(Number(below[1]), below[2] as "f" | "c"));
-    return { key: `le_${maxF}`, label: `≤${maxF}°F`, order: maxF - 1 };
+    const v = Number(below[1]);
+    const unit = below[2].toUpperCase() as "F" | "C";
+    const maxF = toF(v, below[2] as "f" | "c");
+    return { key: `le_${v}_${unit.toLowerCase()}`, label: `≤${v}°${unit}`, order: Math.round(maxF) - 1, unit, minF: null, maxF };
   }
 
   const between = q.match(/between\s+(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)\s*°?\s*([fc])/);
   if (between) {
-    const a = Math.round(toF(Number(between[1]), between[3] as "f" | "c"));
-    const b = Math.round(toF(Number(between[2]), between[3] as "f" | "c"));
-    const lo = Math.min(a, b);
-    const hi = Math.max(a, b);
-    return { key: `r_${lo}_${hi}`, label: `${lo}-${hi}°F`, order: lo };
+    const aRaw = Number(between[1]);
+    const bRaw = Number(between[2]);
+    const unit = between[3].toUpperCase() as "F" | "C";
+    const loRaw = Math.min(aRaw, bRaw);
+    const hiRaw = Math.max(aRaw, bRaw);
+    const aF = toF(aRaw, between[3] as "f" | "c");
+    const bF = toF(bRaw, between[3] as "f" | "c");
+    const loF = Math.min(aF, bF);
+    const hiF = Math.max(aF, bF);
+    return { key: `r_${loRaw}_${hiRaw}_${unit.toLowerCase()}`, label: `${loRaw}-${hiRaw}°${unit}`, order: Math.round(loF), unit, minF: loF, maxF: hiF };
   }
 
   const higher = q.match(/be\s+(-?\d+(?:\.\d+)?)\s*°?\s*([fc])\s*or higher/);
   if (higher) {
-    const minF = Math.round(toF(Number(higher[1]), higher[2] as "f" | "c"));
-    return { key: `ge_${minF}`, label: `≥${minF}°F`, order: 10_000 + minF };
+    const v = Number(higher[1]);
+    const unit = higher[2].toUpperCase() as "F" | "C";
+    const minF = toF(v, higher[2] as "f" | "c");
+    return { key: `ge_${v}_${unit.toLowerCase()}`, label: `≥${v}°${unit}`, order: 10_000 + Math.round(minF), unit, minF, maxF: null };
+  }
+
+  const exact = q.match(/be\s+(-?\d+(?:\.\d+)?)\s*°?\s*([fc])\s+on/);
+  if (exact) {
+    const v = Number(exact[1]);
+    const unit = exact[2].toUpperCase() as "F" | "C";
+    const f = toF(v, exact[2] as "f" | "c");
+    // exact bin: represent as ±0.5°F interval for overlap math
+    return { key: `eq_${v}_${unit.toLowerCase()}`, label: `${v}°${unit}`, order: Math.round(f), unit, minF: f - 0.5, maxF: f + 0.5 };
   }
 
   return null;
@@ -140,6 +161,9 @@ export async function getPolymarketNativeBins(targetDate: string, cityId = "nyc"
         key: parsed.key,
         label: parsed.label,
         order: parsed.order,
+        unit: parsed.unit,
+        minF: parsed.minF,
+        maxF: parsed.maxF,
         yesProb: yn.yesProb,
         noProb: yn.noProb,
         question,

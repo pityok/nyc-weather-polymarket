@@ -14,6 +14,7 @@ import {
 } from "../types/apiQuery.js";
 import { CITY_REGISTRY } from "../config/cities.js";
 import { getPolymarketNativeBins } from "../services/polymarketNative.service.js";
+import { computeEdgeRecommendation } from "../services/edge.service.js";
 
 const router = Router();
 
@@ -52,6 +53,67 @@ function formatMskDateTime(date: Date) {
   }).format(date);
   const [d, t] = parts.split(" ");
   return { date: d, time: t, dateTime: `${d} ${t}` };
+}
+
+type FRange = { minF: number | null; maxF: number | null };
+const LEGACY_F_RANGES: Record<string, FRange> = {
+  le_33: { minF: null, maxF: 33 },
+  r_34_35: { minF: 34, maxF: 35 },
+  r_36_37: { minF: 36, maxF: 37 },
+  r_38_39: { minF: 38, maxF: 39 },
+  r_40_41: { minF: 40, maxF: 41 },
+  r_42_43: { minF: 42, maxF: 43 },
+  r_44_45: { minF: 44, maxF: 45 },
+  r_46_47: { minF: 46, maxF: 47 },
+  r_48_49: { minF: 48, maxF: 49 },
+  r_50_51: { minF: 50, maxF: 51 },
+  r_52_53: { minF: 52, maxF: 53 },
+  ge_54: { minF: 54, maxF: null },
+};
+
+function overlapWeight(a: FRange, b: FRange): number {
+  const aMin = a.minF ?? Number.NEGATIVE_INFINITY;
+  const aMax = a.maxF ?? Number.POSITIVE_INFINITY;
+  const bMin = b.minF ?? Number.NEGATIVE_INFINITY;
+  const bMax = b.maxF ?? Number.POSITIVE_INFINITY;
+  if (aMax < bMin || bMax < aMin) return 0;
+
+  // finite overlap length where possible
+  if (Number.isFinite(aMin) && Number.isFinite(aMax) && Number.isFinite(bMin) && Number.isFinite(bMax)) {
+    return Math.max(0, Math.min(aMax, bMax) - Math.max(aMin, bMin) + 1);
+  }
+  return 1;
+}
+
+function projectLegacyToNative(
+  legacy: Record<string, number>,
+  nativeBins: Array<{ key: string; minF: number | null; maxF: number | null }>,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+
+  for (const bin of nativeBins) {
+    let sum = 0;
+    let totalW = 0;
+    const target: FRange = { minF: bin.minF, maxF: bin.maxF };
+
+    for (const [k, srcRange] of Object.entries(LEGACY_F_RANGES)) {
+      const p = Number(legacy[k] ?? 0);
+      if (!Number.isFinite(p) || p <= 0) continue;
+      const w = overlapWeight(srcRange, target);
+      if (w <= 0) continue;
+      sum += p * w;
+      totalW += w;
+    }
+
+    out[bin.key] = totalW > 0 ? Number((sum / totalW).toFixed(4)) : 0;
+  }
+
+  const s = Object.values(out).reduce((a, b) => a + b, 0);
+  if (s > 0) {
+    for (const k of Object.keys(out)) out[k] = Number(((out[k] / s) * 100).toFixed(4));
+  }
+
+  return out;
 }
 
 router.get("/data.json", async (_req, res, next) => {
@@ -261,12 +323,54 @@ router.get("/api/signals", async (req, res, next) => {
     const { date, cityId } = signalsQuerySchema.parse(req.query);
     const { start, end } = dayBounds(date);
 
-    const items = await prisma.edgeSignal.findMany({
-      where: { targetDate: { gte: start, lte: end }, cityId },
-      orderBy: { edge: "desc" },
-    });
+    const [items, latestRun, native] = await Promise.all([
+      prisma.edgeSignal.findMany({
+        where: { targetDate: { gte: start, lte: end }, cityId },
+        orderBy: { edge: "desc" },
+      }),
+      prisma.forecastRun.findFirst({
+        where: { targetDate: { gte: start, lte: end }, cityId },
+        include: { consensuses: true },
+        orderBy: { createdAt: "desc" },
+      }),
+      getPolymarketNativeBins(date, cityId),
+    ]);
 
-    res.json({ date, items });
+    if (native.status === "healthy" && native.bins.length && latestRun?.consensuses?.length) {
+      const weighted = latestRun.consensuses.find((c) => c.method === "weighted") ?? latestRun.consensuses[0];
+      const legacy = safeParse<Record<string, number>>(weighted.probsJson, {});
+      const aiByNative = projectLegacyToNative(legacy, native.bins);
+
+      const nativeSignals = native.bins
+        .map((b) => {
+          const aiProb = Number(aiByNative[b.key] ?? 0);
+          const marketProb = Number(b.yesProb ?? 0);
+          const { edge, recommendation } = computeEdgeRecommendation(aiProb, marketProb);
+          return {
+            id: `native_${latestRun.id}_${b.key}`,
+            forecastRunId: latestRun.id,
+            targetDate: start,
+            rangeKey: b.label || b.key,
+            aiProb,
+            marketProb,
+            edge,
+            recommendation,
+            reason:
+              recommendation === "bet"
+                ? `native-bin edge>=threshold (${b.unit})`
+                : `native-bin thresholds not met (${b.unit})`,
+            cityId,
+            unit: b.unit,
+            marketQuestion: b.question,
+          };
+        })
+        .sort((a, b) => b.edge - a.edge);
+
+      res.json({ date, cityId, source: "native-bins", items: nativeSignals });
+      return;
+    }
+
+    res.json({ date, cityId, source: "stored-signals", items });
   } catch (error) {
     next(error);
   }
