@@ -15,6 +15,7 @@ import {
 import { CITY_REGISTRY } from "../config/cities.js";
 import { getPolymarketNativeBins } from "../services/polymarketNative.service.js";
 import { computeEdgeRecommendation } from "../services/edge.service.js";
+import { refreshMarketSnapshots } from "../services/marketSnapshot.service.js";
 
 const router = Router();
 
@@ -224,8 +225,12 @@ router.get("/data.json", async (_req, res, next) => {
 
 router.get("/api/summary", async (req, res, next) => {
   try {
-    const { date, cityId } = apiSummaryQuerySchema.parse(req.query);
+    const { date, cityId, refreshNow } = apiSummaryQuerySchema.parse(req.query);
     const { start, end } = dayBounds(date);
+
+    if (refreshNow) {
+      await refreshMarketSnapshots("current", cityId);
+    }
 
     const [forecastRuns, marketCurrent, marketFixed, signals] = await Promise.all([
       prisma.forecastRun.findMany({

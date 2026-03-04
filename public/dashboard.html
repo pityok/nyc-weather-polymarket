@@ -184,7 +184,7 @@ async function load(){
     document.getElementById('updated').innerText = `Загрузка данных: ${date} / ${cityId}...`;
 
     const [summaryRes, signalsRes, marketCurRes, marketFixRes, marketNativeRes, runsRes, snapRes, evolutionRes, qualityRes] = await Promise.all([
-      fetch(`/api/summary?date=${date}&cityId=${cityId}&_t=${t}`),
+      fetch(`/api/summary?date=${date}&cityId=${cityId}&refreshNow=1&_t=${t}`),
       fetch(`/api/signals?date=${date}&cityId=${cityId}&_t=${t}`),
       fetch(`/api/market?date=${date}&type=current&cityId=${cityId}&_t=${t}`),
       fetch(`/api/market?date=${date}&type=fixed_1800_msk&cityId=${cityId}&_t=${t}`),

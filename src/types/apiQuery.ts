@@ -5,6 +5,7 @@ const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const apiSummaryQuerySchema = z.object({
   date: ymd,
   cityId: z.string().optional().default("nyc"),
+  refreshNow: z.coerce.boolean().optional().default(false),
 });
 
 export const runsQuerySchema = z.object({
