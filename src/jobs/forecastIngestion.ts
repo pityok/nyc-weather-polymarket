@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { config } from "../config/index.js";
 import { runForecastPipeline, type ForecastHorizon } from "../services/forecastPipeline.service.js";
 import { refreshMarketSnapshots } from "../services/marketSnapshot.service.js";
+import { VALID_CITY_IDS } from "../config/cities.js";
 import { logWithTime } from "../utils/time.js";
 
 type TriggerResult =
@@ -77,39 +78,47 @@ export function startForecastScheduler() {
 
   const timezone = "Europe/Moscow";
 
-  // 00:00, 06:00, 12:00, 18:00 MSK: collect today/tomorrow/day2 forecasts
+  // 00:00, 06:00, 12:00, 18:00 MSK: collect today/tomorrow/day2 forecasts for all cities
   cron.schedule(
     "0 0,6,12,18 * * *",
     () => {
-      void runForecastBatch();
+      void (async () => {
+        for (const cityId of VALID_CITY_IDS) await runForecastBatch(cityId);
+      })();
     },
     { timezone },
   );
 
-  // Every 10 minutes: refresh current market snapshots
+  // Every 10 minutes: refresh current market snapshots for all cities
   cron.schedule(
     "*/10 * * * *",
     () => {
-      void refreshMarketSnapshots("current", config.defaultCityId).then((result) => {
-        logWithTime(
-          "market-snapshot",
-          `refreshed type=${result.snapshotType} horizons=${result.horizonsProcessed}`,
-        );
-      });
+      void (async () => {
+        for (const cityId of VALID_CITY_IDS) {
+          const result = await refreshMarketSnapshots("current", cityId);
+          logWithTime(
+            "market-snapshot",
+            `refreshed type=${result.snapshotType} cityId=${cityId} horizons=${result.horizonsProcessed}`,
+          );
+        }
+      })();
     },
     { timezone },
   );
 
-  // 18:00 MSK: persist fixed snapshot
+  // 18:00 MSK: persist fixed snapshot for all cities
   cron.schedule(
     "0 18 * * *",
     () => {
-      void refreshMarketSnapshots("fixed_1800_msk", config.defaultCityId).then((result) => {
-        logWithTime(
-          "market-snapshot",
-          `fixed snapshot saved type=${result.snapshotType} horizons=${result.horizonsProcessed}`,
-        );
-      });
+      void (async () => {
+        for (const cityId of VALID_CITY_IDS) {
+          const result = await refreshMarketSnapshots("fixed_1800_msk", cityId);
+          logWithTime(
+            "market-snapshot",
+            `fixed snapshot saved type=${result.snapshotType} cityId=${cityId} horizons=${result.horizonsProcessed}`,
+          );
+        }
+      })();
     },
     { timezone },
   );
