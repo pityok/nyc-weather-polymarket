@@ -4,6 +4,7 @@ import { runForecastPipeline, type ForecastHorizon } from "../services/forecastP
 import { refreshMarketSnapshots } from "../services/marketSnapshot.service.js";
 import { VALID_CITY_IDS } from "../config/cities.js";
 import { logWithTime } from "../utils/time.js";
+import { ensureSimBetsForDate } from "../services/simBets.service.js";
 
 type TriggerResult =
   | {
@@ -117,6 +118,30 @@ export function startForecastScheduler() {
             "market-snapshot",
             `fixed snapshot saved type=${result.snapshotType} cityId=${cityId} horizons=${result.horizonsProcessed}`,
           );
+        }
+      })();
+    },
+    { timezone },
+  );
+
+  // 09:00 MSK: lock simulation bets once for tomorrow (immutable after creation)
+  cron.schedule(
+    "0 9 * * *",
+    () => {
+      void (async () => {
+        const mskToday = new Intl.DateTimeFormat("sv-SE", {
+          timeZone: "Europe/Moscow",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(new Date());
+        const tomorrow = new Date(`${mskToday}T12:00:00.000Z`);
+        tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+        const targetDate = tomorrow.toISOString().slice(0, 10);
+
+        for (const cityId of VALID_CITY_IDS) {
+          const items = await ensureSimBetsForDate(cityId, targetDate);
+          logWithTime("sim-bets", `locked cityId=${cityId} targetDate=${targetDate} count=${items.length}`);
         }
       })();
     },

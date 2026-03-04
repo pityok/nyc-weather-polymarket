@@ -1,6 +1,4 @@
 import { Router } from "express";
-import fs from "node:fs";
-import path from "node:path";
 import { prisma } from "../db/client.js";
 import { runBacktest } from "../services/backtest.service.js";
 import { safeParse } from "../utils/json.js";
@@ -18,45 +16,9 @@ import { CITY_REGISTRY } from "../config/cities.js";
 import { getPolymarketNativeBins } from "../services/polymarketNative.service.js";
 import { computeEdgeRecommendation } from "../services/edge.service.js";
 import { refreshMarketSnapshots } from "../services/marketSnapshot.service.js";
+import { ensureSimBetsForDate, readSimBets } from "../services/simBets.service.js";
 
 const router = Router();
-const SIM_BETS_FILE = path.resolve(process.cwd(), "data/sim-bets.jsonl");
-
-type SimBet = {
-  id: string;
-  strategy: "equal33" | "edgeWeighted";
-  cityId: string;
-  targetDate: string;
-  createdAt: string;
-  runId: string;
-  rangeKey: string;
-  recommendation: string;
-  stakeUsd: number;
-  marketProb: number;
-  aiProb: number;
-  edge: number;
-};
-
-function readSimBets(): SimBet[] {
-  if (!fs.existsSync(SIM_BETS_FILE)) return [];
-  const lines = fs.readFileSync(SIM_BETS_FILE, "utf8").split("\n").filter(Boolean);
-  const out: SimBet[] = [];
-  for (const ln of lines) {
-    try {
-      out.push(JSON.parse(ln) as SimBet);
-    } catch {
-      // ignore malformed lines
-    }
-  }
-  return out;
-}
-
-function appendSimBets(items: SimBet[]) {
-  if (!items.length) return;
-  fs.mkdirSync(path.dirname(SIM_BETS_FILE), { recursive: true });
-  const payload = items.map((x) => JSON.stringify(x)).join("\n") + "\n";
-  fs.appendFileSync(SIM_BETS_FILE, payload, "utf8");
-}
 
 function dayBounds(date: string) {
   const start = new Date(`${date}T00:00:00.000Z`);
@@ -425,77 +387,10 @@ router.get("/api/sim-bets", async (req, res, next) => {
     const { date, cityId } = signalsQuerySchema.parse(req.query);
     const ensure = String(req.query.ensure ?? "0") === "1";
 
-    const all = readSimBets();
-    let items = all.filter((x) => x.cityId === cityId && x.targetDate === date);
+    let items = readSimBets().filter((x) => x.cityId === cityId && x.targetDate === date);
 
-    const hasEqual = items.some((x) => x.strategy === "equal33");
-    const hasWeighted = items.some((x) => x.strategy === "edgeWeighted");
-
-    if (ensure && (!hasEqual || !hasWeighted)) {
-      const { start, end } = dayBounds(date);
-      const latestRun = await prisma.forecastRun.findFirst({
-        where: { targetDate: { gte: start, lte: end }, cityId },
-        orderBy: { createdAt: "desc" },
-      });
-
-      if (latestRun) {
-        const signals = await prisma.edgeSignal.findMany({
-          where: { forecastRunId: latestRun.id, cityId },
-          orderBy: { edge: "desc" },
-        });
-
-        const picks = signals.slice(0, 3);
-        const createdAt = new Date().toISOString();
-
-        const equalStake = picks.length ? 100 / picks.length : 0;
-        const simEqual = picks.map((p, i) => ({
-          id: `sim_equal_${latestRun.id}_${i}`,
-          strategy: "equal33" as const,
-          cityId,
-          targetDate: date,
-          createdAt,
-          runId: latestRun.id,
-          rangeKey: p.rangeKey,
-          recommendation: p.recommendation,
-          stakeUsd: Number(equalStake.toFixed(2)),
-          marketProb: p.marketProb,
-          aiProb: p.aiProb,
-          edge: p.edge,
-        } satisfies SimBet));
-
-        // Edge-weighted strategy with risk caps
-        const alpha = 1.35;
-        const beta = 0.7;
-        const minStake = 10;
-        const maxStake = 60;
-
-        const rawWeights = picks.map((p) => Math.pow(Math.max(0, p.edge), alpha) * Math.pow(Math.max(0, p.aiProb) / 100, beta));
-        const wSum = rawWeights.reduce((a, b) => a + b, 0) || 1;
-        let stakes = rawWeights.map((w) => (w / wSum) * 100);
-
-        stakes = stakes.map((s) => Math.max(minStake, Math.min(maxStake, s)));
-        const cappedSum = stakes.reduce((a, b) => a + b, 0) || 1;
-        stakes = stakes.map((s) => (s / cappedSum) * 100);
-
-        const simWeighted = picks.map((p, i) => ({
-          id: `sim_weighted_${latestRun.id}_${i}`,
-          strategy: "edgeWeighted" as const,
-          cityId,
-          targetDate: date,
-          createdAt,
-          runId: latestRun.id,
-          rangeKey: p.rangeKey,
-          recommendation: p.recommendation,
-          stakeUsd: Number(stakes[i].toFixed(2)),
-          marketProb: p.marketProb,
-          aiProb: p.aiProb,
-          edge: p.edge,
-        } satisfies SimBet));
-
-        const created = [...simEqual, ...simWeighted];
-        appendSimBets(created);
-        items = created;
-      }
+    if (ensure) {
+      items = await ensureSimBetsForDate(cityId, date);
     }
 
     const equal33 = items.filter((x) => x.strategy === "equal33");
