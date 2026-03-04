@@ -62,6 +62,21 @@
       <table id="betsTable"></table>
     </div>
 
+    <div class="card" style="grid-column:1 / -1">
+      <h2>Симуляция: ставки $100/день</h2>
+      <div class="muted" id="simBetsMeta"></div>
+      <div class="grid" style="grid-template-columns:repeat(2,minmax(280px,1fr));gap:12px;">
+        <div>
+          <h3>Sim #1 Equal 33%</h3>
+          <table id="simBetsTable1"></table>
+        </div>
+        <div>
+          <h3>Sim #2 Edge-Weighted</h3>
+          <table id="simBetsTable2"></table>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <h2>Сводка</h2>
       <table id="summaryTable"></table>
@@ -183,7 +198,7 @@ async function load(){
 
     document.getElementById('updated').innerText = `Загрузка данных: ${date} / ${cityId}...`;
 
-    const [summaryRes, signalsRes, marketCurRes, marketFixRes, marketNativeRes, runsRes, snapRes, evolutionRes, qualityRes] = await Promise.all([
+    const [summaryRes, signalsRes, marketCurRes, marketFixRes, marketNativeRes, runsRes, snapRes, evolutionRes, qualityRes, simBetsRes] = await Promise.all([
       fetch(`/api/summary?date=${date}&cityId=${cityId}&refreshNow=1&_t=${t}`),
       fetch(`/api/signals?date=${date}&cityId=${cityId}&_t=${t}`),
       fetch(`/api/market?date=${date}&type=current&cityId=${cityId}&_t=${t}`),
@@ -193,6 +208,7 @@ async function load(){
       fetch(`/dashboard/snapshot?includeHistory=true&historyLimit=10&cityId=${cityId}&_t=${t}`),
       fetch(`/api/evolution?date=${date}&cityId=${cityId}&_t=${t}`),
       fetch(`/api/model-quality?windowDays=7&cityId=${cityId}&_t=${t}`),
+      fetch(`/api/sim-bets?date=${date}&cityId=${cityId}&ensure=1&_t=${t}`),
     ]);
 
     if(!summaryRes.ok){
@@ -209,6 +225,7 @@ async function load(){
   const snap = snapRes.ok ? await snapRes.json() : {history:[]};
   const evolution = evolutionRes.ok ? await evolutionRes.json() : { versions: [], deltas: [] };
   const quality = qualityRes.ok ? await qualityRes.json() : { models: [] };
+  const simBets = simBetsRes.ok ? await simBetsRes.json() : { items: [], totalStakeUsd: 0 };
 
   const latestRun = (runs.items || [])[0] || null;
   const latestRunId = latestRun?.id || null;
@@ -267,6 +284,18 @@ async function load(){
 
   document.getElementById('betsTable').innerHTML = `<tr><th>Range</th><th>Edge</th><th>AI</th><th>Market</th><th>Reason</th></tr>` +
     (bets.length ? bets.map(b=>`<tr><td>${b.rangeKey}</td><td>${fmt(b.edge)}</td><td>${fmt(b.aiProb)}</td><td>${fmt(b.marketProb)}</td><td>${b.reason||''}</td></tr>`).join('') : '<tr><td colspan="5" class="muted">Нет bet сигналов</td></tr>');
+
+  const s1 = simBets?.strategies?.equal33?.items || (simBets.items||[]).filter(x=>x.strategy==='equal33');
+  const s2 = simBets?.strategies?.edgeWeighted?.items || (simBets.items||[]).filter(x=>x.strategy==='edgeWeighted');
+  document.getElementById('simBetsMeta').innerText = `Target: ${date} | S1: $${fmt(simBets?.strategies?.equal33?.totalStakeUsd||0)} | S2: $${fmt(simBets?.strategies?.edgeWeighted?.totalStakeUsd||0)}`;
+
+  const simTable = (arr) => `<tr><th>Range</th><th>Stake $</th><th>AI %</th><th>Market %</th><th>Edge</th></tr>` +
+    (arr.length
+      ? arr.map(b=>`<tr><td>${b.rangeKey}</td><td>${fmt(b.stakeUsd)}</td><td>${fmt(b.aiProb)}</td><td>${fmt(b.marketProb)}</td><td>${fmt(b.edge)}</td></tr>`).join('')
+      : '<tr><td colspan="5" class="muted">Нет ставок</td></tr>');
+
+  document.getElementById('simBetsTable1').innerHTML = simTable(s1);
+  document.getElementById('simBetsTable2').innerHTML = simTable(s2);
 
   // Probability matrix
   const rows = [];
