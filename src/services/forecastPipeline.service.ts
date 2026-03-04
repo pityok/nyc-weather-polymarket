@@ -151,7 +151,7 @@ export async function gatherForecastPayload(
         llmAdapters.map((adapter) =>
           adapter.getForecast({
             targetDate,
-            location: "NYC LaGuardia",
+            location: city.displayName,
             context: { note: "Do not use market probabilities", cityId },
           }),
         ),
