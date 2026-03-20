@@ -19,4 +19,5 @@ export const config = {
   copytradeFollowerWallet: process.env.COPYTRADE_FOLLOWER_WALLET ?? "0xace51d70031617af61a8e809c28eebcef1c84457",
   copytradeActivityPageLimit: Number(process.env.COPYTRADE_ACTIVITY_PAGE_LIMIT ?? 200),
   copytradeActivityMaxPages: Number(process.env.COPYTRADE_ACTIVITY_MAX_PAGES ?? 25),
+  copytradeFullResyncEvery: Number(process.env.COPYTRADE_FULL_RESYNC_EVERY ?? 12),
 } as const;

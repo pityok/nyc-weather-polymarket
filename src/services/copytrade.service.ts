@@ -303,6 +303,14 @@ function clockTime(date = new Date()) {
   }).format(date);
 }
 
+function fullResyncEvery() {
+  return Math.max(1, Math.trunc(config.copytradeFullResyncEvery));
+}
+
+function shouldForceFullResync() {
+  return persistence.refreshCount > 0 && persistence.refreshCount % fullResyncEvery() === 0;
+}
+
 function recordActivityMetadata(activity: RawActivity[]) {
   let newestTs: number | null = null;
   const dedupKeys: string[] = [];
@@ -867,12 +875,12 @@ async function fetchActivityPage(wallet: string, limit: number, offset: number) 
   return payload as RawActivity[];
 }
 
-async function fetchAllLeaderActivity(wallet: string): Promise<LeaderActivityFetchResult> {
+async function fetchAllLeaderActivity(wallet: string, options?: { forceFull?: boolean }): Promise<LeaderActivityFetchResult> {
   const rows: RawActivity[] = [];
   const seen = new Set<string>();
   const persistedDedup = new Set(persistence.dedupKeys);
   const cursorSec = persistence.activityCursorSec;
-  const canIncremental = cursorSec !== null && persistedDedup.size > 0 && state.positionRows.length > 0;
+  const canIncremental = !options?.forceFull && cursorSec !== null && persistedDedup.size > 0 && state.positionRows.length > 0;
   const pageLimit = config.copytradeActivityPageLimit;
 
   for (let page = 0; page < config.copytradeActivityMaxPages; page += 1) {
@@ -1287,11 +1295,12 @@ export async function refreshCopytradeState() {
   refreshPromise = (async () => {
     const previousRuntime = state.bot.runtime;
     const refreshStartedAt = toIsoNow();
+    const forceFullResync = shouldForceFullResync();
     state.bot.runtime = "loading";
 
     try {
       const [activityResult, followerPositions] = await Promise.all([
-        fetchAllLeaderActivity(state.leader.wallet),
+        fetchAllLeaderActivity(state.leader.wallet, { forceFull: forceFullResync }),
         fetchFollowerPositions(state.follower.wallet),
       ]);
       applyLiveRefresh(activityResult.items, followerPositions, { incremental: activityResult.incremental });
@@ -1300,7 +1309,8 @@ export async function refreshCopytradeState() {
       persistence.lastRefreshOkAt = state.bot.lastSyncAt;
       persistence.lastRefreshError = null;
       await persistCurrentState();
-      logWithTime("copytrade", `refresh ok leaderEvents=${state.leaderEvents.length} rows=${state.positionRows.length}`);
+      const refreshMode = activityResult.incremental ? "incremental" : forceFullResync ? "full-reconcile" : "full";
+      logWithTime("copytrade", `refresh ok mode=${refreshMode} leaderEvents=${state.leaderEvents.length} rows=${state.positionRows.length}`);
       return getCopytradeSnapshot();
     } catch (error) {
       state.bot.health = "error";

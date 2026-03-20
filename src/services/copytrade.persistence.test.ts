@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { config } from "../config/index.js";
 import {
   clearCopytradePersistenceForTests,
   getCopytradeSnapshot,
@@ -216,6 +217,96 @@ describe("copytrade sqlite persistence", () => {
     expect(restored.mode).toBe("paper");
     expect(restored.executionLog).toHaveLength(1);
     expect(restored.executionLog[0]?.executionPhase).toBe("paper_order_staged");
+  });
+
+  it("runs a periodic full resync to reconcile drift beyond the incremental cursor window", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    let activityCall = 0;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+
+      if (url.includes("/activity?")) {
+        activityCall += 1;
+
+        if (activityCall === 1) {
+          return new Response(JSON.stringify([
+            {
+              name: "Lex-tang",
+              type: "TRADE",
+              conditionId: "cond-reconcile-1",
+              title: "Will the highest temperature in New York City be between 60-61°F on March 21?",
+              eventSlug: "highest-temperature-in-nyc-on-march-21-2026",
+              outcome: "Yes",
+              side: "BUY",
+              size: 100,
+              usdcSize: 30,
+              price: 0.3,
+              timestamp: now - 300,
+              transactionHash: "0xreconcile-buy",
+            },
+          ]), { status: 200, headers: { "content-type": "application/json" } });
+        }
+
+        if (activityCall <= config.copytradeFullResyncEvery) {
+          return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+        }
+
+        return new Response(JSON.stringify([
+          {
+            name: "Lex-tang",
+            type: "TRADE",
+            conditionId: "cond-reconcile-1",
+            title: "Will the highest temperature in New York City be between 60-61°F on March 21?",
+            eventSlug: "highest-temperature-in-nyc-on-march-21-2026",
+            outcome: "Yes",
+            side: "SELL",
+            size: 60,
+            usdcSize: 18,
+            price: 0.3,
+            timestamp: now - 240,
+            transactionHash: "0xreconcile-sell",
+          },
+          {
+            name: "Lex-tang",
+            type: "TRADE",
+            conditionId: "cond-reconcile-1",
+            title: "Will the highest temperature in New York City be between 60-61°F on March 21?",
+            eventSlug: "highest-temperature-in-nyc-on-march-21-2026",
+            outcome: "Yes",
+            side: "BUY",
+            size: 100,
+            usdcSize: 30,
+            price: 0.3,
+            timestamp: now - 300,
+            transactionHash: "0xreconcile-buy",
+          },
+        ]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+
+      if (url.includes("/positions?")) {
+        return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+
+      return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+    });
+
+    await refreshCopytradeState();
+    expect(getCopytradeSnapshot().positions[0]?.lexNetShares).toBe(100);
+
+    for (let i = 0; i < config.copytradeFullResyncEvery; i += 1) {
+      await refreshCopytradeState();
+    }
+
+    const reconciled = getCopytradeSnapshot();
+    expect(reconciled.positions[0]).toMatchObject({
+      conditionId: "cond-reconcile-1",
+      lexNetShares: 40,
+      myTargetShares: 4,
+      deltaShares: 4,
+    });
+    expect(reconciled.leaderEvents[0]?.txHash).toBe("0xreconcile-sell");
+    expect(activityCall).toBe(config.copytradeFullResyncEvery + 1);
   });
 
 });
