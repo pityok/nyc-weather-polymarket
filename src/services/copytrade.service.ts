@@ -1,3 +1,9 @@
+import { config } from "../config/index.js";
+import {
+  fetchWithRetry,
+  RETRY_POLYMARKET,
+} from "../utils/fetchWithRetry.js";
+import { logWithTime } from "../utils/time.js";
 import {
   copytradeConfigPatchSchema,
   copytradeModeBodySchema,
@@ -11,6 +17,52 @@ import {
   type CopytradeSystemState,
 } from "../types/copytrade.js";
 
+const POLYMARKET_ACTIVITY_URL = "https://data-api.polymarket.com/activity";
+const POLYMARKET_POSITIONS_URL = "https://data-api.polymarket.com/positions";
+const COPYTRADE_USER_AGENT = "nyc-weather-polymarket-copytrade/0.2";
+const DAY_SECONDS = 86_400;
+
+type PositionRow = CopytradeState["positionRows"][number];
+
+type RawActivity = {
+  conditionId?: unknown;
+  eventSlug?: unknown;
+  name?: unknown;
+  outcome?: unknown;
+  price?: unknown;
+  side?: unknown;
+  size?: unknown;
+  timestamp?: unknown;
+  title?: unknown;
+  transactionHash?: unknown;
+  type?: unknown;
+  usdcSize?: unknown;
+};
+
+type RawPosition = {
+  avgPrice?: unknown;
+  cashPnl?: unknown;
+  conditionId?: unknown;
+  curPrice?: unknown;
+  currentValue?: unknown;
+  outcome?: unknown;
+  realizedPnl?: unknown;
+  size?: unknown;
+  title?: unknown;
+};
+
+type AggregatedLeaderRow = {
+  conditionId: string;
+  market: string;
+  outcome: string;
+  lexNetShares: number;
+  lastPrice: number;
+  avgTradePrice: number;
+  lastTs: number;
+  partialFillCount: number;
+  totalVolumeUsd: number;
+};
+
 const initialState: CopytradeState = copytradeStateSchema.parse({
   mode: "dry-run",
   bot: {
@@ -22,12 +74,12 @@ const initialState: CopytradeState = copytradeStateSchema.parse({
   },
   leader: {
     name: "Lex-tang",
-    wallet: "0xaa930fdc4caa3c0f6067404a7bd7899ca45f0bc7",
+    wallet: config.copytradeLeaderWallet,
     activity24h: 17,
     weatherActivity24h: 12,
   },
   follower: {
-    wallet: "0xace51d70031617af61a8e809c28eebcef1c84457",
+    wallet: config.copytradeFollowerWallet,
     totalExposure: 118,
   },
   config: {
@@ -188,9 +240,79 @@ const initialState: CopytradeState = copytradeStateSchema.parse({
 });
 
 const state: CopytradeState = structuredClone(initialState);
+let refreshPromise: Promise<CopytradeSnapshot> | null = null;
 
 function round(value: number, digits = 2) {
   return Number(value.toFixed(digits));
+}
+
+function num(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function str(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeOutcome(value: unknown): string {
+  const outcome = str(value).toUpperCase();
+  return outcome === "YES" || outcome === "NO" ? outcome : "";
+}
+
+function normalizeSide(value: unknown): "BUY" | "SELL" | "" {
+  const side = str(value).toUpperCase();
+  return side === "BUY" || side === "SELL" ? side : "";
+}
+
+function toIsoNow() {
+  return new Date().toISOString();
+}
+
+function clockTime(date = new Date()) {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "UTC",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function isWeatherMarket(title: string, eventSlug: string) {
+  return /highest temperature/i.test(title) || /highest-temperature/i.test(eventSlug);
+}
+
+function cityShort(city: string) {
+  const map: Record<string, string> = {
+    "New York City": "NYC",
+    Atlanta: "ATL",
+    Chicago: "CHI",
+    Dallas: "DAL",
+    London: "LON",
+    "Los Angeles": "LA",
+    Miami: "MIA",
+    Munich: "MUC",
+    Seattle: "SEA",
+    Tokyo: "TYO",
+    Toronto: "TOR",
+    Wellington: "WEL",
+  };
+  return map[city] ?? city;
+}
+
+function shortWeatherTitle(title: string) {
+  const betweenMatch = title.match(/Will the highest temperature in (.+?) be between (.+?) on/i);
+  if (betweenMatch) {
+    return `${cityShort(betweenMatch[1])} ${betweenMatch[2].replace(/\s+/g, "")}`;
+  }
+
+  const exactMatch = title.match(/Will the highest temperature in (.+?) be (.+?) on/i);
+  if (exactMatch) {
+    return `${cityShort(exactMatch[1])} ${exactMatch[2].replace(/\s+/g, "")}`;
+  }
+
+  return title;
 }
 
 function freeBudget() {
@@ -201,19 +323,19 @@ function isLimitBreached() {
   return state.follower.totalExposure > state.config.maxTotalExposure;
 }
 
-function sharesTarget(row: CopytradeState["positionRows"][number]) {
+function sharesTarget(row: PositionRow) {
   return round(row.lexNetShares * state.config.scale, 1);
 }
 
-function deltaShares(row: CopytradeState["positionRows"][number]) {
+function deltaShares(row: PositionRow) {
   return round(sharesTarget(row) - row.myCurrentShares, 1);
 }
 
-function deltaNotional(row: CopytradeState["positionRows"][number]) {
+function deltaNotional(row: PositionRow) {
   return round(Math.abs(deltaShares(row)) * row.midCents / 100, 2);
 }
 
-function lexNotional(row: CopytradeState["positionRows"][number]) {
+function lexNotional(row: PositionRow) {
   return round(row.lexNetShares * row.midCents / 100, 1);
 }
 
@@ -224,19 +346,34 @@ function executionStatus(row: CopytradeEvaluatedRow) {
   return row.status;
 }
 
-function evaluateRow(row: CopytradeState["positionRows"][number]): CopytradeEvaluatedRow {
+function evaluateRow(row: PositionRow): CopytradeEvaluatedRow {
   const myTargetShares = sharesTarget(row);
   const delta = deltaShares(row);
   const notional = deltaNotional(row);
   const limitBreached = isLimitBreached();
   const quietGateCleared = row.quietWindowLeftSec === 0 || notional >= state.config.forceRebalanceNotionalUsd;
   const canBuy = !limitBreached;
+  const isEntry = row.myCurrentShares <= 0 && myTargetShares > 0 && delta > 0;
+  const isExit = row.myCurrentShares > 0 && myTargetShares <= 0 && delta < 0;
+  const isNoOutcome = row.outcome === "NO";
 
   let action: CopytradeEvaluatedRow["action"] = "HOLD";
   let status: CopytradeEvaluatedRow["status"] = "WAITING";
   let reason = "Queue is waiting for a clearer execution window.";
 
-  if (row.signalAgeSec > state.config.maxSignalAgeSec) {
+  if (isNoOutcome && !state.config.copyNoSide) {
+    action = "SKIP";
+    status = "BLOCKED";
+    reason = "copyNoSide=false, so NO-side target updates are ignored.";
+  } else if (isEntry && !state.config.copyEntries) {
+    action = "SKIP";
+    status = "BLOCKED";
+    reason = "copyEntries=false, so new leader entries are not copied.";
+  } else if (isExit && !state.config.copyExits) {
+    action = "SKIP";
+    status = "BLOCKED";
+    reason = "copyExits=false, so full exits are not copied.";
+  } else if (row.signalAgeSec > state.config.maxSignalAgeSec) {
     action = "SKIP";
     status = "BLOCKED";
     reason = "signalAgeSec exceeded maxSignalAgeSec, so this target update is stale.";
@@ -305,6 +442,7 @@ function pendingRebalances(rows: CopytradeEvaluatedRow[]) {
 }
 
 function systemStates(rows: CopytradeEvaluatedRow[]): CopytradeSystemState[] {
+  const hasStaleRows = rows.some((row) => row.signalAgeSec > state.config.maxSignalAgeSec);
   return [
     {
       name: "loading",
@@ -317,12 +455,12 @@ function systemStates(rows: CopytradeEvaluatedRow[]): CopytradeSystemState[] {
     },
     {
       name: "stale data",
-      active: rows.some((row) => row.signalAgeSec > state.config.maxSignalAgeSec),
-      value: rows.some((row) => row.signalAgeSec > state.config.maxSignalAgeSec) ? "ACTIVE" : "CLEAR",
-      note: rows.some((row) => row.signalAgeSec > state.config.maxSignalAgeSec)
+      active: hasStaleRows,
+      value: hasStaleRows ? "ACTIVE" : "CLEAR",
+      note: hasStaleRows
         ? "One or more targets exceeded maxSignalAgeSec and are blocked."
         : "All visible rows are still inside the configured freshness window.",
-      tone: rows.some((row) => row.signalAgeSec > state.config.maxSignalAgeSec) ? "bad" : "good",
+      tone: hasStaleRows ? "bad" : "good",
     },
     {
       name: "sync error",
@@ -364,12 +502,325 @@ function systemStates(rows: CopytradeEvaluatedRow[]): CopytradeSystemState[] {
 }
 
 function touchSync() {
-  state.bot.lastSyncAt = new Date().toISOString();
+  state.bot.lastSyncAt = toIsoNow();
   if (state.mode === "paused") {
     state.bot.runtime = "paused";
   } else if (state.bot.runtime === "paused") {
     state.bot.runtime = "running";
   }
+}
+
+function activityKey(item: RawActivity) {
+  return [
+    str(item.transactionHash),
+    String(Math.trunc(num(item.timestamp))),
+    str(item.type),
+    str(item.side),
+    normalizeOutcome(item.outcome),
+    str(item.title),
+    String(num(item.size)),
+    String(num(item.price)),
+  ].join("|");
+}
+
+async function fetchActivityPage(wallet: string, limit: number, offset: number) {
+  const url = `${POLYMARKET_ACTIVITY_URL}?user=${encodeURIComponent(wallet)}&limit=${limit}&offset=${offset}`;
+  const res = await fetchWithRetry(
+    url,
+    {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": COPYTRADE_USER_AGENT,
+      },
+    },
+    RETRY_POLYMARKET,
+  );
+  const payload = await res.json();
+  if (!Array.isArray(payload)) {
+    throw new Error("Unexpected copytrade activity payload");
+  }
+  return payload as RawActivity[];
+}
+
+async function fetchAllLeaderActivity(wallet: string) {
+  const rows: RawActivity[] = [];
+  const seen = new Set<string>();
+  const pageLimit = config.copytradeActivityPageLimit;
+
+  for (let page = 0; page < config.copytradeActivityMaxPages; page += 1) {
+    const offset = page * pageLimit;
+    const payload = await fetchActivityPage(wallet, pageLimit, offset);
+    if (payload.length === 0) {
+      break;
+    }
+
+    for (const item of payload) {
+      if (str(item.type).toUpperCase() !== "TRADE") {
+        continue;
+      }
+
+      const key = activityKey(item);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      rows.push(item);
+    }
+
+    if (payload.length < pageLimit) {
+      break;
+    }
+  }
+
+  rows.sort((a, b) => num(b.timestamp) - num(a.timestamp));
+  return rows;
+}
+
+async function fetchFollowerPositions(wallet: string) {
+  const limit = 500;
+  const url = `${POLYMARKET_POSITIONS_URL}?user=${encodeURIComponent(wallet)}&limit=${limit}&offset=0&sizeThreshold=0&sortBy=CURRENT&sortDirection=DESC`;
+  const res = await fetchWithRetry(
+    url,
+    {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": COPYTRADE_USER_AGENT,
+      },
+    },
+    RETRY_POLYMARKET,
+  );
+  const payload = await res.json();
+  if (!Array.isArray(payload)) {
+    throw new Error("Unexpected copytrade positions payload");
+  }
+  return payload as RawPosition[];
+}
+
+function positionKey(conditionId: string, outcome: string) {
+  return `${conditionId}::${outcome}`;
+}
+
+function buildFollowerMap(positions: RawPosition[]) {
+  const map = new Map<string, RawPosition>();
+  for (const position of positions) {
+    const conditionId = str(position.conditionId);
+    const outcome = normalizeOutcome(position.outcome);
+    if (!conditionId || !outcome) {
+      continue;
+    }
+    map.set(positionKey(conditionId, outcome), position);
+  }
+  return map;
+}
+
+function aggregateLeaderRows(activity: RawActivity[], followerPositions: RawPosition[]) {
+  const aggregates = new Map<string, AggregatedLeaderRow>();
+  const followerMap = buildFollowerMap(followerPositions);
+  const now = new Date();
+  const nowSec = Math.floor(now.getTime() / 1000);
+  const timeMark = clockTime(now);
+
+  for (const item of activity) {
+    const title = str(item.title);
+    const eventSlug = str(item.eventSlug);
+    if (state.config.weatherOnly && !isWeatherMarket(title, eventSlug)) {
+      continue;
+    }
+
+    const conditionId = str(item.conditionId);
+    const outcome = normalizeOutcome(item.outcome);
+    const side = normalizeSide(item.side);
+    if (!conditionId || !outcome || !side) {
+      continue;
+    }
+
+    const key = positionKey(conditionId, outcome);
+    const size = num(item.size);
+    const price = num(item.price);
+    const usdcSize = num(item.usdcSize) || size * price;
+    const sign = side === "BUY" ? 1 : -1;
+    const existing = aggregates.get(key) ?? {
+      conditionId,
+      market: shortWeatherTitle(title),
+      outcome,
+      lexNetShares: 0,
+      lastPrice: 0,
+      avgTradePrice: 0,
+      lastTs: 0,
+      partialFillCount: 0,
+      totalVolumeUsd: 0,
+    };
+
+    const prevAbsShares = existing.partialFillCount === 0 ? 0 : existing.totalVolumeUsd / Math.max(existing.avgTradePrice, 0.0001);
+    existing.market = shortWeatherTitle(title);
+    existing.lexNetShares += sign * size;
+    existing.totalVolumeUsd += usdcSize;
+    existing.partialFillCount += 1;
+    existing.avgTradePrice = (prevAbsShares + size) > 0
+      ? existing.totalVolumeUsd / (prevAbsShares + size)
+      : price;
+
+    if (num(item.timestamp) >= existing.lastTs) {
+      existing.lastTs = Math.trunc(num(item.timestamp));
+      existing.lastPrice = price;
+    }
+
+    aggregates.set(key, existing);
+  }
+
+  const rows: PositionRow[] = [];
+  for (const aggregate of aggregates.values()) {
+    const key = positionKey(aggregate.conditionId, aggregate.outcome);
+    const follower = followerMap.get(key);
+    const myCurrentShares = round(num(follower?.size), 2);
+    const lexNetShares = round(Math.max(0, aggregate.lexNetShares), 2);
+
+    if (lexNetShares <= 0.05 && myCurrentShares <= 0.05) {
+      continue;
+    }
+
+    const followerCurPrice = num(follower?.curPrice);
+    const followerAvgPrice = num(follower?.avgPrice);
+    const midCents = round(Math.max(1, (followerCurPrice || aggregate.lastPrice || aggregate.avgTradePrice) * 100), 1);
+    const spreadWidth = aggregate.totalVolumeUsd < 25 ? 2.4 : aggregate.totalVolumeUsd < 75 ? 1.2 : 0.8;
+    const bestBidCents = round(Math.max(1, midCents - spreadWidth / 2), 1);
+    const bestAskCents = round(Math.min(99, midCents + spreadWidth / 2), 1);
+    const signalAgeSec = Math.max(0, nowSec - aggregate.lastTs);
+    const quietWindowLeftSec = state.config.respectCooldown
+      ? Math.max(0, state.config.quietWindowSec - signalAgeSec)
+      : 0;
+    const wideMarket = spreadWidth > state.config.maxPriceDriftPct;
+
+    rows.push({
+      conditionId: aggregate.conditionId,
+      market: aggregate.market,
+      outcome: aggregate.outcome,
+      lexNetShares,
+      myCurrentShares,
+      midCents,
+      bestBidCents,
+      bestAskCents,
+      avgEntryCents: round(Math.max(1, (followerAvgPrice || aggregate.avgTradePrice || aggregate.lastPrice) * 100), 1),
+      signalAgeSec,
+      partialFillCount: aggregate.partialFillCount,
+      quietWindowLeftSec,
+      depthUsd: round(Math.max(aggregate.totalVolumeUsd * 2.5, 50), 2),
+      wideMarket,
+      driftBlocked: wideMarket,
+      decisionTime: timeMark,
+      executionTime: timeMark,
+      executionPhase: quietWindowLeftSec > 0 ? "quiet_window" : "target_synced",
+      unrealizedPnlUsd: round(num(follower?.cashPnl), 2),
+    });
+  }
+
+  rows.sort((a, b) => a.signalAgeSec - b.signalAgeSec || b.lexNetShares - a.lexNetShares);
+  return rows;
+}
+
+function buildLeaderEvents(activity: RawActivity[]) {
+  const groupCounts = new Map<string, number>();
+  const filtered = activity.filter((item) => {
+    const title = str(item.title);
+    const eventSlug = str(item.eventSlug);
+    return !state.config.weatherOnly || isWeatherMarket(title, eventSlug);
+  });
+
+  for (const item of filtered) {
+    const conditionId = str(item.conditionId);
+    const outcome = normalizeOutcome(item.outcome);
+    if (!conditionId || !outcome) {
+      continue;
+    }
+    const key = positionKey(conditionId, outcome);
+    groupCounts.set(key, (groupCounts.get(key) ?? 0) + 1);
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  return filtered.slice(0, 20).flatMap((item) => {
+    const side = normalizeSide(item.side);
+    const conditionId = str(item.conditionId);
+    const outcome = normalizeOutcome(item.outcome);
+    if (!side || !conditionId || !outcome) {
+      return [];
+    }
+
+    const key = positionKey(conditionId, outcome);
+    const signalAgeSec = Math.max(0, nowSec - Math.trunc(num(item.timestamp)));
+    const tone: "good" | "warn" | "bad" = signalAgeSec <= state.config.quietWindowSec
+      ? "good"
+      : signalAgeSec <= state.config.maxSignalAgeSec
+        ? "warn"
+        : "bad";
+
+    return [{
+      market: shortWeatherTitle(str(item.title)),
+      outcome,
+      action: side,
+      sizeUsd: round(num(item.usdcSize) || num(item.size) * num(item.price), 2),
+      priceCents: round(num(item.price) * 100, 1),
+      signalAgeSec,
+      txHash: str(item.transactionHash),
+      group: key,
+      partialFills: groupCounts.get(key) ?? 1,
+      note: side === "BUY"
+        ? "Fresh leader buy captured from /activity and folded into target-position state."
+        : "Fresh leader sell captured from /activity and reflected in scaled target shares.",
+      tone,
+    }];
+  });
+}
+
+function trackingError(rows: CopytradeEvaluatedRow[]) {
+  const totalTargetNotional = rows.reduce((sum, row) => sum + Math.abs(row.myTargetShares * row.midCents / 100), 0);
+  if (totalTargetNotional <= 0) {
+    return 0;
+  }
+  const totalDeltaNotional = rows.reduce((sum, row) => sum + row.deltaNotional, 0);
+  return round((totalDeltaNotional / totalTargetNotional) * 100, 2);
+}
+
+function applyLiveRefresh(activity: RawActivity[], followerPositions: RawPosition[]) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const rows = aggregateLeaderRows(activity, followerPositions);
+  const events = buildLeaderEvents(activity);
+  const latestName = str(activity[0]?.name) || state.leader.name;
+  const filteredWeatherActivity = activity.filter((item) => isWeatherMarket(str(item.title), str(item.eventSlug)));
+  const activity24h = activity.filter((item) => nowSec - Math.trunc(num(item.timestamp)) <= DAY_SECONDS).length;
+  const weatherActivity24h = filteredWeatherActivity
+    .filter((item) => nowSec - Math.trunc(num(item.timestamp)) <= DAY_SECONDS)
+    .length;
+  const totalExposure = round(followerPositions.reduce((sum, position) => sum + num(position.currentValue), 0), 2);
+  const realizedPnl = round(followerPositions.reduce((sum, position) => sum + num(position.realizedPnl), 0), 2);
+  const unrealizedPnl = round(followerPositions.reduce((sum, position) => sum + num(position.cashPnl), 0), 2);
+
+  state.leader = {
+    name: latestName,
+    wallet: state.leader.wallet,
+    activity24h,
+    weatherActivity24h,
+  };
+  state.follower = {
+    wallet: state.follower.wallet,
+    totalExposure,
+  };
+  state.leaderEvents = events;
+  state.positionRows = rows;
+  state.bot.health = rows.length > 0 ? "ok" : "warn";
+  state.bot.lagSec = rows[0]?.signalAgeSec ?? 0;
+  touchSync();
+
+  const evaluatedRows = getRows();
+  state.stats = {
+    processed24h: weatherActivity24h,
+    skipped24h: evaluatedRows.filter((row) => row.action === "SKIP").length,
+    held24h: evaluatedRows.filter((row) => row.action === "HOLD").length,
+    trackingErrorPct: trackingError(evaluatedRows),
+    avgSlippagePct: 0,
+    realizedPnl,
+    unrealizedPnl,
+    mtmPnl: round(realizedPnl + unrealizedPnl, 2),
+  };
 }
 
 export function getCopytradeSnapshot(): CopytradeSnapshot {
@@ -423,6 +874,41 @@ export function getCopytradeSnapshot(): CopytradeSnapshot {
   });
 }
 
+export async function refreshCopytradeState() {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  refreshPromise = (async () => {
+    const previousRuntime = state.bot.runtime;
+    state.bot.runtime = "loading";
+
+    try {
+      const [activity, followerPositions] = await Promise.all([
+        fetchAllLeaderActivity(state.leader.wallet),
+        fetchFollowerPositions(state.follower.wallet),
+      ]);
+      applyLiveRefresh(activity, followerPositions);
+      logWithTime("copytrade", `refresh ok leaderEvents=${state.leaderEvents.length} rows=${state.positionRows.length}`);
+      return getCopytradeSnapshot();
+    } catch (error) {
+      state.bot.health = "error";
+      state.bot.runtime = state.mode === "paused" ? "paused" : previousRuntime === "paused" ? "running" : previousRuntime;
+      logWithTime("copytrade", `refresh failed error=${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    } finally {
+      if (state.mode === "paused") {
+        state.bot.runtime = "paused";
+      } else if (state.bot.runtime === "loading") {
+        state.bot.runtime = "running";
+      }
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
+}
+
 export function getCopytradeState() {
   return structuredClone(state);
 }
@@ -464,6 +950,7 @@ export function resumeCopytrade() {
 
 export function resetCopytradeState() {
   Object.assign(state, structuredClone(initialState));
+  refreshPromise = null;
 }
 
 export function getCopytradeMode(): CopytradeMode {

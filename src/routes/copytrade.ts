@@ -4,6 +4,7 @@ import {
   getCopytradeSnapshot,
   getCopytradeState,
   pauseCopytrade,
+  refreshCopytradeState,
   resumeCopytrade,
   setCopytradeMode,
   updateCopytradeConfig,
@@ -120,6 +121,20 @@ router.post("/api/copytrade/control/pause", (req, res, next) => {
 router.post("/api/copytrade/control/resume", (_req, res) => {
   const snapshot = resumeCopytrade();
   res.json({ mode: snapshot.mode, runtime: snapshot.bot.runtime, pausedReason: snapshot.bot.pausedReason });
+});
+
+router.post("/api/copytrade/control/refresh", async (_req, res, next) => {
+  try {
+    const snapshot = await refreshCopytradeState();
+    res.json({
+      ok: snapshot.bot.health !== "error",
+      lastSyncAt: snapshot.bot.lastSyncAt,
+      leaderEvents: snapshot.leaderEvents.length,
+      positions: snapshot.positions.length,
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.get("/api/copytrade/mode", (_req, res) => {

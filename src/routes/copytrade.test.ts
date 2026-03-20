@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import app from "../app.js";
 import { resetCopytradeState } from "../services/copytrade.service.js";
 
 afterEach(() => {
   resetCopytradeState();
+  vi.restoreAllMocks();
 });
 
 describe("GET /api/copytrade/status", () => {
@@ -82,5 +83,85 @@ describe("POST /api/copytrade/control/pause", () => {
       runtime: "running",
       pausedReason: null,
     });
+  });
+});
+
+describe("POST /api/copytrade/control/refresh", () => {
+  it("hydrates copytrade state from live Polymarket activity and positions payloads", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+
+      if (url.includes("/activity?")) {
+        return new Response(JSON.stringify([
+          {
+            name: "Lex-tang",
+            type: "TRADE",
+            conditionId: "cond-live-1",
+            title: "Will the highest temperature in New York City be between 54-55°F on March 21?",
+            eventSlug: "highest-temperature-in-nyc-on-march-21-2026",
+            outcome: "Yes",
+            side: "BUY",
+            size: 120,
+            usdcSize: 30,
+            price: 0.25,
+            timestamp: Math.floor(Date.now() / 1000) - 120,
+            transactionHash: "0xabc",
+          },
+          {
+            name: "Lex-tang",
+            type: "TRADE",
+            conditionId: "cond-live-1",
+            title: "Will the highest temperature in New York City be between 54-55°F on March 21?",
+            eventSlug: "highest-temperature-in-nyc-on-march-21-2026",
+            outcome: "Yes",
+            side: "BUY",
+            size: 30,
+            usdcSize: 9,
+            price: 0.3,
+            timestamp: Math.floor(Date.now() / 1000) - 100,
+            transactionHash: "0xdef",
+          },
+        ]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+
+      if (url.includes("/positions?")) {
+        return new Response(JSON.stringify([
+          {
+            conditionId: "cond-live-1",
+            title: "Will the highest temperature in New York City be between 54-55°F on March 21?",
+            outcome: "Yes",
+            size: 8,
+            avgPrice: 0.2,
+            curPrice: 0.31,
+            currentValue: 2.48,
+            cashPnl: 0.88,
+            realizedPnl: 0,
+          },
+        ]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+
+      return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+    });
+
+    const refreshRes = await request(app).post("/api/copytrade/control/refresh");
+
+    expect(refreshRes.status).toBe(200);
+    expect(refreshRes.body.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalled();
+
+    const snapshot = await request(app).get("/api/copytrade/snapshot");
+    expect(snapshot.body.leader.name).toBe("Lex-tang");
+    expect(snapshot.body.positions[0]).toMatchObject({
+      conditionId: "cond-live-1",
+      market: "NYC 54-55°F",
+      outcome: "YES",
+      lexNetShares: 150,
+      myCurrentShares: 8,
+      myTargetShares: 15,
+      deltaShares: 7,
+      action: "BUY",
+      status: "READY",
+    });
+    expect(snapshot.body.leaderEvents[0].group).toBe("cond-live-1::YES");
   });
 });
