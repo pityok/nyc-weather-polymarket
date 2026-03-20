@@ -1,0 +1,2366 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Weather Position Copier Dashboard Sim</title>
+  <style>
+    :root {
+      --bg: #f6f1e8;
+      --bg-2: #efe5d5;
+      --panel: rgba(255, 252, 247, 0.82);
+      --panel-strong: rgba(255, 252, 247, 0.94);
+      --line: rgba(69, 56, 42, 0.12);
+      --ink: #201a16;
+      --muted: #726558;
+      --accent: #c65a3d;
+      --accent-2: #145f5a;
+      --good: #177245;
+      --warn: #b56c12;
+      --bad: #b9382f;
+      --shadow: 0 18px 50px rgba(63, 45, 28, 0.12);
+      --radius: 22px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(198, 90, 61, 0.15), transparent 28%),
+        radial-gradient(circle at top right, rgba(20, 95, 90, 0.16), transparent 24%),
+        linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+      min-height: 100vh;
+    }
+
+    .shell {
+      max-width: 1520px;
+      margin: 0 auto;
+      padding: 24px 18px 40px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(255, 252, 247, 0.76);
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      backdrop-filter: blur(14px);
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--good);
+      box-shadow: 0 0 0 6px rgba(23, 114, 69, 0.14);
+    }
+
+    h1 {
+      margin: 10px 0 8px;
+      font-size: clamp(32px, 4vw, 56px);
+      line-height: 0.95;
+      letter-spacing: -0.04em;
+      max-width: 820px;
+    }
+
+    .lead {
+      margin: 0;
+      max-width: 820px;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.5;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    button,
+    .button {
+      border: 0;
+      cursor: pointer;
+      border-radius: 999px;
+      padding: 12px 18px;
+      font-size: 14px;
+      font-weight: 600;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+    }
+
+    button:hover,
+    .button:hover {
+      transform: translateY(-1px);
+    }
+
+    .button-ghost {
+      background: rgba(255, 252, 247, 0.78);
+      color: var(--ink);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }
+
+    .button-primary {
+      background: linear-gradient(135deg, var(--accent) 0%, #db7652 100%);
+      color: #fffdf7;
+      box-shadow: 0 14px 28px rgba(198, 90, 61, 0.24);
+    }
+
+    .button-danger {
+      background: linear-gradient(135deg, var(--bad) 0%, #d14a40 100%);
+      color: #fffaf8;
+      box-shadow: 0 14px 28px rgba(185, 56, 47, 0.18);
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.45fr 0.95fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(16px);
+    }
+
+    .panel-hero {
+      padding: 22px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .panel-hero::after {
+      content: "";
+      position: absolute;
+      inset: auto -60px -80px auto;
+      width: 240px;
+      height: 240px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(20, 95, 90, 0.18) 0%, transparent 72%);
+      pointer-events: none;
+    }
+
+    .status-row,
+    .stats-grid,
+    .workspace,
+    .market-grid,
+    .bottom-grid,
+    .state-grid {
+      display: grid;
+      gap: 14px;
+    }
+
+    .status-row {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-top: 18px;
+    }
+
+    .status-card,
+    .metric,
+    .mini-panel,
+    .market-card,
+    .queue-item,
+    .event-item,
+    .log-item,
+    .trace-item,
+    .state-card,
+    .agg-card {
+      background: rgba(255, 255, 255, 0.58);
+      border: 1px solid rgba(69, 56, 42, 0.08);
+      border-radius: 18px;
+    }
+
+    .status-card,
+    .metric,
+    .state-card,
+    .agg-card {
+      padding: 14px;
+    }
+
+    .status-label,
+    .metric-label,
+    .section-kicker,
+    .field label,
+    .pill-label,
+    .table th {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .status-value {
+      margin-top: 10px;
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+    }
+
+    .status-note,
+    .state-note,
+    .agg-note {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .control-panel {
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      background:
+        linear-gradient(180deg, rgba(255, 252, 247, 0.94) 0%, rgba(247, 239, 228, 0.92) 100%);
+    }
+
+    .section-title {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: -0.03em;
+    }
+
+    .section-copy {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .mode-switch {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      padding: 8px;
+      border-radius: 18px;
+      background: rgba(32, 26, 22, 0.05);
+    }
+
+    .mode-btn {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid transparent;
+      padding: 14px 12px;
+      border-radius: 14px;
+      text-align: left;
+    }
+
+    .mode-btn strong {
+      display: block;
+      color: var(--ink);
+      font-size: 15px;
+      margin-bottom: 4px;
+    }
+
+    .mode-btn.active {
+      background: var(--panel-strong);
+      border-color: rgba(69, 56, 42, 0.08);
+      box-shadow: 0 10px 24px rgba(69, 56, 42, 0.08);
+      color: var(--ink);
+    }
+
+    .signal-strip,
+    .hero-strip,
+    .split,
+    .trace-checks {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid rgba(69, 56, 42, 0.08);
+      font-size: 13px;
+    }
+
+    .pill-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      animation: pulse 2.4s infinite ease-in-out;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.18); opacity: 0.7; }
+    }
+
+    .stats-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-bottom: 16px;
+    }
+
+    .metric {
+      padding: 16px;
+    }
+
+    .metric-value {
+      margin-top: 8px;
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+    }
+
+    .metric-sub {
+      margin-top: 6px;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .workspace {
+      grid-template-columns: 1.1fr 1fr 0.95fr;
+      margin-bottom: 16px;
+      align-items: start;
+    }
+
+    .box {
+      padding: 18px;
+    }
+
+    .box-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .mono {
+      font-family: "JetBrains Mono", "SFMono-Regular", monospace;
+      font-size: 12px;
+    }
+
+    .event-list,
+    .queue-list,
+    .log-list,
+    .trace-list,
+    .exec-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .event-item,
+    .queue-item,
+    .log-item,
+    .trace-item {
+      padding: 14px;
+    }
+
+    .event-head,
+    .queue-head,
+    .log-head,
+    .trace-head,
+    .exec-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .event-title,
+    .queue-title,
+    .market-title,
+    .trace-title {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .event-meta,
+    .queue-meta,
+    .log-body,
+    .market-copy,
+    .trace-copy,
+    .exec-body {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .tag-good {
+      background: rgba(23, 114, 69, 0.12);
+      color: var(--good);
+    }
+
+    .tag-warn {
+      background: rgba(181, 108, 18, 0.12);
+      color: var(--warn);
+    }
+
+    .tag-bad {
+      background: rgba(185, 56, 47, 0.12);
+      color: var(--bad);
+    }
+
+    .tag-muted {
+      background: rgba(20, 95, 90, 0.12);
+      color: var(--accent-2);
+    }
+
+    .tag-pair {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .split .pill {
+      padding: 8px 10px;
+      font-size: 12px;
+    }
+
+    .field-key,
+    .pill-key {
+      font-family: "JetBrains Mono", "SFMono-Regular", monospace;
+      text-transform: none;
+      letter-spacing: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .risk-fields {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.58);
+      border: 1px solid rgba(69, 56, 42, 0.08);
+    }
+
+    .field-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .field-value {
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .toggle-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .toggle {
+      width: 48px;
+      height: 28px;
+      border-radius: 999px;
+      background: rgba(32, 26, 22, 0.12);
+      position: relative;
+      flex: 0 0 auto;
+    }
+
+    .toggle::after {
+      content: "";
+      position: absolute;
+      top: 4px;
+      left: 4px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.14);
+    }
+
+    .toggle.on {
+      background: rgba(20, 95, 90, 0.28);
+    }
+
+    .toggle.on::after {
+      left: 24px;
+      background: var(--accent-2);
+    }
+
+    .state-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-top: 14px;
+    }
+
+    .system-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .state-value {
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      margin-top: 8px;
+    }
+
+    .system-card {
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.58);
+      border: 1px solid rgba(69, 56, 42, 0.08);
+      border-radius: 18px;
+    }
+
+    .system-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    .system-name {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .system-value {
+      margin-top: 10px;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+    }
+
+    .system-note {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .market-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-bottom: 16px;
+    }
+
+    .market-card {
+      padding: 18px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .market-card::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto auto 0;
+      width: 100%;
+      height: 5px;
+      background: linear-gradient(90deg, var(--accent), rgba(20, 95, 90, 0.8));
+      opacity: 0.7;
+    }
+
+    .market-stats {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .market-stat {
+      padding: 10px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.62);
+      border: 1px solid rgba(69, 56, 42, 0.07);
+    }
+
+    .market-stat b {
+      display: block;
+      margin-top: 4px;
+      font-size: 20px;
+      letter-spacing: -0.03em;
+    }
+
+    .bottom-grid {
+      grid-template-columns: 1fr 1fr;
+      align-items: start;
+      margin-bottom: 16px;
+    }
+
+    .progress-card {
+      padding: 16px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.58);
+      border: 1px solid rgba(69, 56, 42, 0.08);
+    }
+
+    .progress-row {
+      margin-top: 14px;
+    }
+
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .progress-track {
+      width: 100%;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(32, 26, 22, 0.08);
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent-2), #2f908a);
+    }
+
+    .progress-fill.warn {
+      background: linear-gradient(90deg, var(--warn), #d59634);
+    }
+
+    .progress-fill.bad {
+      background: linear-gradient(90deg, var(--bad), #df6259);
+    }
+
+    .table-wrap {
+      overflow: auto;
+      border-radius: 18px;
+      border: 1px solid rgba(69, 56, 42, 0.08);
+      background: rgba(255, 255, 255, 0.5);
+    }
+
+    table {
+      width: 100%;
+      min-width: 1100px;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 12px 10px;
+      text-align: left;
+      font-size: 13px;
+      border-bottom: 1px solid rgba(69, 56, 42, 0.08);
+      vertical-align: top;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      background: rgba(255, 252, 247, 0.95);
+      backdrop-filter: blur(10px);
+      z-index: 1;
+    }
+
+    tbody tr:hover {
+      background: rgba(255, 255, 255, 0.48);
+    }
+
+    .trace-check {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      border: 1px solid rgba(69, 56, 42, 0.08);
+      background: rgba(255, 255, 255, 0.68);
+    }
+
+    .trace-check.good { color: var(--good); }
+    .trace-check.warn { color: var(--warn); }
+    .trace-check.bad { color: var(--bad); }
+
+    .exec-list {
+      gap: 12px;
+    }
+
+    .exec-row {
+      padding: 14px;
+      border-radius: 18px;
+      border: 1px solid rgba(69, 56, 42, 0.08);
+      background: rgba(255, 255, 255, 0.58);
+    }
+
+    .footer-note {
+      margin-top: 16px;
+      padding: 14px 18px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255, 252, 247, 0.64);
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    @media (max-width: 1280px) {
+      .hero,
+      .workspace,
+      .market-grid,
+      .bottom-grid,
+      .stats-grid,
+      .state-grid,
+      .system-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .workspace > :last-child,
+      .market-grid > :last-child,
+      .bottom-grid > :last-child {
+        grid-column: 1 / -1;
+      }
+    }
+
+    @media (max-width: 900px) {
+      .topbar,
+      .hero,
+      .status-row,
+      .stats-grid,
+      .workspace,
+      .market-grid,
+      .bottom-grid,
+      .state-grid,
+      .system-grid {
+        grid-template-columns: 1fr;
+        display: grid;
+      }
+
+      .header-actions {
+        justify-content: flex-start;
+      }
+
+      .mode-switch {
+        grid-template-columns: 1fr;
+      }
+
+      h1 {
+        max-width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="topbar">
+      <div>
+        <div class="eyebrow">Симуляция интерфейса</div>
+        <h1>Control room для Weather target-position copier</h1>
+        <p class="lead">
+          Этот экран уже думает не сделками, а позицией. Мы читаем activity Lex-tang, агрегируем микроfills в net position, считаем мою цель, сравниваем с текущим состоянием и только потом принимаем rebalance decision.
+        </p>
+      </div>
+      <div class="header-actions">
+        <button id="refreshBtn" class="button-ghost">Обновить симуляцию</button>
+        <button id="realBtn" class="button-primary">Переключить в Real</button>
+        <button id="pauseBtn" class="button-danger">Paused</button>
+      </div>
+    </div>
+
+    <section class="hero">
+      <div class="panel panel-hero">
+        <div class="section-kicker">Общий статус</div>
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-top:8px">
+          <div>
+            <div id="heroMode" style="font-size:40px;font-weight:800;letter-spacing:-0.05em">Dry-run</div>
+            <div id="heroReason" class="section-copy">Бот строит target position, считает delta и пишет решение по ребалансировке без реальной отправки ордеров.</div>
+          </div>
+          <div class="pill">
+            <span class="pill-dot"></span>
+            <span id="syncStatus">Bot ok, лаг 2.1с, последний sync 14:20:00Z</span>
+          </div>
+        </div>
+
+        <div class="hero-strip" style="margin-top:12px">
+          <div class="pill"><span class="pill-label">Leader</span><strong id="leaderName">Lex-tang</strong></div>
+          <div class="pill"><span class="pill-label">Scale</span><strong id="quickScale">0.10x</strong></div>
+          <div class="pill"><span class="pill-label">Quiet window</span><strong id="quickQuiet">90s</strong></div>
+          <div class="pill"><span class="pill-label">Max signal age</span><strong id="quickSignalAge">180s</strong></div>
+          <div class="pill"><span class="pill-label">P&L</span><strong id="heroPnl">+$24.8 MTM</strong></div>
+        </div>
+
+        <div class="status-row">
+          <div class="status-card">
+            <div class="status-label">Leader wallet</div>
+            <div id="leaderWallet" class="status-value mono">0xaa93...0bc7</div>
+            <div class="status-note">Читаем `activity`, затем агрегируем partial fills по `(conditionId, outcome)`.</div>
+          </div>
+          <div class="status-card">
+            <div class="status-label">Follower wallet</div>
+            <div id="followerWallet" class="status-value mono">0xace5...4457</div>
+            <div class="status-note">Truth по нашему состоянию берём из positions, не из локальных догадок.</div>
+          </div>
+          <div class="status-card">
+            <div class="status-label">Exposure / budget</div>
+            <div id="exposureBudget" class="status-value">$118 / $32 free</div>
+            <div id="exposureNote" class="status-note">Within configured max total exposure. Свободного бюджета хватает на ещё один маленький rebalance.</div>
+          </div>
+          <div class="status-card">
+            <div class="status-label">Последнее решение</div>
+            <div id="latestDecision" class="status-value">BUY · READY</div>
+            <div id="latestDecisionNote" class="status-note">Delta ниже `min_trade_notional`, ордер не нужен.</div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="panel control-panel">
+        <div>
+          <div class="section-kicker">Режим</div>
+          <h2 class="section-title">Один экран для режимов и risk-гейтов</h2>
+          <p class="section-copy">Здесь видно не “копировать ли сделку”, а “нужно ли двигать мою позицию к цели прямо сейчас”.</p>
+        </div>
+
+        <div class="mode-switch">
+          <button class="mode-btn" data-mode="observer">
+            <strong>Observer</strong>
+            Только мониторинг
+          </button>
+          <button class="mode-btn active" data-mode="dry-run">
+            <strong>Dry-run</strong>
+            Решение без ордера
+          </button>
+          <button class="mode-btn" data-mode="paper">
+            <strong>Paper</strong>
+            Бумажное исполнение
+          </button>
+          <button class="mode-btn" data-mode="real">
+            <strong>Real</strong>
+            Реальные ордера
+          </button>
+          <button class="mode-btn" data-mode="paused">
+            <strong>Paused</strong>
+            Всё на стопе
+          </button>
+        </div>
+
+        <div class="signal-strip">
+          <div class="pill"><span class="pill-label">Scale</span><strong id="configScalePill">0.10x</strong></div>
+          <div class="pill"><span class="pill-label">Min notional</span><strong id="configMinPill">$2</strong></div>
+          <div class="pill"><span class="pill-label">Rebalance window</span><strong id="configRebalancePill">300s</strong></div>
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="button-primary" style="flex:1 1 220px">Подтвердить режим</button>
+          <button class="button-ghost" style="flex:1 1 160px">Открыть execution log</button>
+        </div>
+      </aside>
+    </section>
+
+    <section class="stats-grid">
+      <div class="metric">
+        <div class="metric-label">Leader activity 24h</div>
+        <div id="metricLeaderActivity" class="metric-value">17</div>
+        <div class="metric-sub">Общий поток fills по кошельку лидера.</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Weather signals 24h</div>
+        <div id="metricWeatherSignals" class="metric-value">12</div>
+        <div class="metric-sub">После фильтра `weather_only`.</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Pending rebalances</div>
+        <div id="metricPending" class="metric-value">4</div>
+        <div class="metric-sub">Сигналы готовы к действию или ожидают quiet window.</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Signals processed</div>
+        <div id="metricProcessed" class="metric-value">17</div>
+        <div class="metric-sub">Из них часть ушла в HOLD и SKIP.</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Signals skipped</div>
+        <div id="metricSkipped" class="metric-value">5</div>
+        <div class="metric-sub">Risk, slippage или stale signal.</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Tracking error</div>
+        <div id="metricTracking" class="metric-value">2.4%</div>
+        <div class="metric-sub">Насколько follower отстаёт от target profile.</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Avg slippage</div>
+        <div id="metricSlippage" class="metric-value">0.7%</div>
+        <div class="metric-sub">Среднее по mock execution.</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Open positions</div>
+        <div id="metricPositions" class="metric-value">6</div>
+        <div class="metric-sub">Realized / Unrealized / MTM ниже на экране.</div>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <div class="panel box">
+        <div class="box-header">
+          <div>
+            <div class="section-kicker">Leader activity</div>
+            <h2 class="section-title">Лента activity лидера</h2>
+          </div>
+          <div class="tag tag-good">Grouped partial fills</div>
+        </div>
+        <div id="leaderEvents" class="event-list"></div>
+      </div>
+
+      <div class="panel box">
+        <div class="box-header">
+          <div>
+            <div class="section-kicker">Rebalance</div>
+            <h2 class="section-title">Rebalance queue</h2>
+          </div>
+          <div id="queueTag" class="tag tag-warn">Dry-run decision flow</div>
+        </div>
+        <div id="rebalanceQueue" class="queue-list"></div>
+      </div>
+
+      <div class="panel box">
+        <div class="box-header">
+          <div>
+            <div class="section-kicker">Risk config</div>
+            <h2 class="section-title">Настройки position copier</h2>
+          </div>
+          <div class="tag tag-good">Editable</div>
+        </div>
+        <div class="risk-fields">
+          <div class="field">
+            <div class="field-head">
+              <label for="scaleRange">Scale / target sizing</label>
+              <div id="scaleValue" class="field-value">0.10x</div>
+            </div>
+            <input id="scaleRange" type="range" min="0.01" max="0.50" step="0.01" value="0.10" />
+          </div>
+
+          <div class="field">
+            <div class="field-head">
+              <label class="field-key" for="minTradeRange">min_trade_notional_usd</label>
+              <div id="minTradeValue" class="field-value">$2</div>
+            </div>
+            <input id="minTradeRange" type="range" min="1" max="20" step="1" value="2" />
+          </div>
+
+          <div class="field">
+            <div class="field-head">
+              <label class="field-key" for="forceThresholdRange">force_rebalance_notional_usd</label>
+              <div id="forceThresholdValue" class="field-value">$8</div>
+            </div>
+            <input id="forceThresholdRange" type="range" min="2" max="40" step="1" value="8" />
+          </div>
+
+          <div class="field">
+            <div class="field-head">
+              <label for="quietRange">Quiet window</label>
+              <div id="quietValue" class="field-value">90s</div>
+            </div>
+            <input id="quietRange" type="range" min="30" max="240" step="15" value="90" />
+          </div>
+
+          <div class="field">
+            <div class="field-head">
+              <label for="rebalanceWindowRange">Rebalance window</label>
+              <div id="rebalanceWindowValue" class="field-value">300s</div>
+            </div>
+            <input id="rebalanceWindowRange" type="range" min="60" max="900" step="30" value="300" />
+          </div>
+
+          <div class="field">
+            <div class="field-head">
+              <label for="signalAgeRange">Max signal age</label>
+              <div id="signalAgeValue" class="field-value">180s</div>
+            </div>
+            <input id="signalAgeRange" type="range" min="30" max="600" step="30" value="180" />
+          </div>
+
+          <div class="field">
+            <div class="field-head">
+              <label for="slippageRange">Max slippage</label>
+              <div id="slippageValue" class="field-value">1.5%</div>
+            </div>
+            <input id="slippageRange" type="range" min="0.2" max="5" step="0.1" value="1.5" />
+          </div>
+
+          <div class="field">
+            <div class="field-head">
+              <label for="priceDriftRange">Max price drift</label>
+              <div id="priceDriftValue" class="field-value">1.5%</div>
+            </div>
+            <input id="priceDriftRange" type="range" min="0.2" max="5" step="0.1" value="1.5" />
+          </div>
+
+          <div class="field">
+            <div class="field-head">
+              <label for="totalExposureRange">Max total exposure</label>
+              <div id="totalExposureValue" class="field-value">$150</div>
+            </div>
+            <input id="totalExposureRange" type="range" min="50" max="400" step="10" value="150" />
+          </div>
+
+          <div class="field">
+            <div class="field-head">
+              <label for="marketExposureRange">Max market exposure</label>
+              <div id="marketExposureValue" class="field-value">$15</div>
+            </div>
+            <input id="marketExposureRange" type="range" min="5" max="50" step="1" value="15" />
+          </div>
+
+          <div class="field">
+            <div class="toggle-row">
+              <div>
+                <div class="status-label">copy_entries</div>
+                <div class="section-copy">Разрешать входы, если target растёт.</div>
+              </div>
+              <div id="toggleCopyEntries" class="toggle on"></div>
+            </div>
+          </div>
+
+          <div class="field">
+            <div class="toggle-row">
+              <div>
+                <div class="status-label">copy_exits</div>
+                <div class="section-copy">Разрешать уменьшение моей позиции при снижении цели.</div>
+              </div>
+              <div id="toggleCopyExits" class="toggle on"></div>
+            </div>
+          </div>
+
+          <div class="field">
+            <div class="toggle-row">
+              <div>
+                <div class="status-label">copy_no_side</div>
+                <div class="section-copy">Разрешить outcome `NO`, если лидер уходит туда.</div>
+              </div>
+              <div id="toggleCopyNoSide" class="toggle"></div>
+            </div>
+          </div>
+
+          <div class="field">
+            <div class="toggle-row">
+              <div>
+                <div class="status-label">skip_wide_market</div>
+                <div class="section-copy">Пропускать рынки с плохой глубиной и широким spread.</div>
+              </div>
+              <div id="toggleWideMarket" class="toggle on"></div>
+            </div>
+          </div>
+
+          <div class="field">
+            <div class="toggle-row">
+              <div>
+                <div class="status-label">respect_cooldown</div>
+                <div class="section-copy">Не дёргать позицию слишком часто.</div>
+              </div>
+              <div id="toggleCooldown" class="toggle on"></div>
+            </div>
+          </div>
+
+          <div class="field">
+            <div class="toggle-row">
+              <div>
+                <div class="status-label">weather_only</div>
+                <div class="section-copy">Следить только за Weather markets.</div>
+              </div>
+              <div id="toggleWeatherOnly" class="toggle on"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel box" style="margin-bottom:16px">
+      <div class="box-header">
+        <div>
+          <div class="section-kicker">Runtime States</div>
+          <h2 class="section-title">Backend-ready system states</h2>
+        </div>
+        <div class="tag tag-muted">Mock wiring surface</div>
+      </div>
+      <div id="systemStateGrid" class="system-grid"></div>
+    </section>
+
+    <section class="panel box" style="margin-bottom:16px">
+      <div class="box-header">
+        <div>
+          <div class="section-kicker">Target Position State</div>
+          <h2 class="section-title">lexNetShares -> myTargetShares -> myCurrentShares -> deltaShares</h2>
+        </div>
+        <div class="tag tag-good">Ядро логики</div>
+      </div>
+      <div id="targetStateGrid" class="state-grid"></div>
+    </section>
+
+    <section class="bottom-grid">
+      <div class="panel box">
+        <div class="box-header">
+          <div>
+            <div class="section-kicker">Aggregation State</div>
+            <h2 class="section-title">Как микроfills превращаются в target</h2>
+          </div>
+          <div class="tag tag-muted">Partial fill aware</div>
+        </div>
+        <div id="aggregationState" class="state-grid"></div>
+      </div>
+
+      <div class="panel box">
+        <div class="box-header">
+          <div>
+            <div class="section-kicker">Decision Trace</div>
+            <h2 class="section-title">Почему бот выбрал именно это решение</h2>
+          </div>
+          <div class="tag tag-bad">Нужно для доверия</div>
+        </div>
+        <div id="decisionTrace" class="trace-list"></div>
+      </div>
+    </section>
+
+    <section class="panel box" style="margin-bottom:16px">
+      <div class="box-header">
+        <div>
+          <div class="section-kicker">Positions Table</div>
+          <h2 class="section-title">Каноничное состояние позиций</h2>
+        </div>
+        <div class="tag tag-good">Current vs target</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Market</th>
+              <th>Outcome</th>
+              <th>lexNetShares</th>
+              <th>myCurrentShares</th>
+              <th>myTargetShares</th>
+              <th>deltaShares</th>
+              <th>deltaNotional</th>
+              <th>Avg entry</th>
+              <th>Current mid</th>
+              <th>Unrealized pnl</th>
+              <th>Last leader activity</th>
+              <th>action</th>
+              <th>status</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody id="positionsTable"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel box" style="margin-bottom:16px">
+      <div class="box-header">
+        <div>
+          <div class="section-kicker">Markets</div>
+          <h2 class="section-title">Position-aware market cards</h2>
+        </div>
+        <div class="tag tag-good">Target over edge</div>
+      </div>
+      <div id="marketGrid" class="market-grid"></div>
+    </section>
+
+    <section class="bottom-grid">
+      <div class="panel box">
+      <div class="box-header">
+        <div>
+          <div class="section-kicker">Лимиты</div>
+          <h2 class="section-title">Нагрузка на риск</h2>
+        </div>
+        <div class="tag-pair">
+          <div id="limitStateTag" class="tag tag-good">Within limits</div>
+          <div id="botHealthTag" class="tag tag-good">Bot health: ok</div>
+        </div>
+      </div>
+      <div class="progress-card">
+        <div class="progress-row">
+            <div class="progress-label"><span>Total exposure</span><strong id="totalExposureLabel">$118 / $150</strong></div>
+            <div class="progress-track"><div id="totalExposureBar" class="progress-fill" style="width:100%"></div></div>
+          </div>
+          <div class="progress-row">
+            <div class="progress-label"><span>Free budget</span><strong id="freeBudgetLabel">$32</strong></div>
+            <div class="progress-track"><div id="freeBudgetBar" class="progress-fill" style="width:68%"></div></div>
+          </div>
+          <div class="progress-row">
+            <div class="progress-label"><span>Pending rebalances</span><strong id="pendingLabel">4 / 8</strong></div>
+            <div class="progress-track"><div id="pendingBar" class="progress-fill" style="width:50%"></div></div>
+          </div>
+          <div class="progress-row">
+            <div class="progress-label"><span>PnL split</span><strong id="pnlSplitLabel">R $6.2 / U $18.6 / MTM $24.8</strong></div>
+            <div class="progress-track"><div id="pnlBar" class="progress-fill" style="width:62%"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel box">
+        <div class="box-header">
+          <div>
+            <div class="section-kicker">Decision / skip log</div>
+            <h2 class="section-title">Журнал решений</h2>
+          </div>
+          <div class="tag tag-warn">Operator view</div>
+        </div>
+        <div id="decisionLog" class="log-list"></div>
+      </div>
+    </section>
+
+    <section class="panel box">
+      <div class="box-header">
+        <div>
+          <div class="section-kicker">Execution Log</div>
+          <h2 class="section-title">Mock execution flow</h2>
+        </div>
+        <div class="tag tag-good">order_submitted -> fill_complete</div>
+      </div>
+      <div id="executionLog" class="exec-list"></div>
+    </section>
+
+    <div id="footerNote" class="footer-note">
+      Dashboard сначала пытается загрузить живой backend snapshot, а если API недоступен — откатывается на локальную симуляцию. Контракт данных уже выровнен под target-position copier: `activity -> aggregation -> lexNetShares -> myCurrentShares -> myTargetShares -> deltaShares -> deltaNotional -> action/status -> execution`.
+    </div>
+  </div>
+
+  <script>
+    const fallbackState = {
+      mode: "dry-run",
+      bot: {
+        runtime: "running",
+        health: "ok",
+        lastSyncAt: "2026-03-19T14:20:00Z",
+        lagSec: 2.1,
+      },
+      leader: {
+        name: "Lex-tang",
+        wallet: "0xaa930fdc4caa3c0f6067404a7bd7899ca45f0bc7",
+        activity24h: 17,
+        weatherActivity24h: 12,
+      },
+      follower: {
+        wallet: "0xace51d70031617af61a8e809c28eebcef1c84457",
+        totalExposure: 118,
+      },
+      config: {
+        scale: 0.1,
+        minTradeNotionalUsd: 2,
+        forceRebalanceNotionalUsd: 8,
+        quietWindowSec: 90,
+        rebalanceWindowSec: 300,
+        maxSignalAgeSec: 180,
+        maxSlippagePct: 1.5,
+        maxPriceDriftPct: 1.5,
+        maxTotalExposure: 150,
+        maxMarketExposure: 15,
+        copyEntries: true,
+        copyExits: true,
+        copyNoSide: false,
+        skipWideMarket: true,
+        respectCooldown: true,
+        weatherOnly: true,
+      },
+      stats: {
+        processed24h: 17,
+        skipped24h: 5,
+        held24h: 3,
+        trackingErrorPct: 2.4,
+        avgSlippagePct: 0.7,
+        realizedPnl: 6.2,
+        unrealizedPnl: 18.6,
+        mtmPnl: 24.8,
+      },
+      leaderEvents: [
+        {
+          market: "NYC 61-62F",
+          outcome: "YES",
+          action: "BUY",
+          size: "$18.4",
+          price: "39.1c",
+          signalAgeSec: 24,
+          txHash: "0x7b4e...9f2c",
+          group: "agg-nyc-61-62",
+          partialFills: 4,
+          note: "Четвёртый microfill в ту же aggregation group. Lex net продолжает расти.",
+          tone: "good",
+        },
+        {
+          market: "Chicago 48-49F",
+          outcome: "YES",
+          action: "BUY",
+          size: "$6.8",
+          price: "44.7c",
+          signalAgeSec: 71,
+          txHash: "0x28b1...0c43",
+          group: "agg-chi-48-49",
+          partialFills: 2,
+          note: "Сигнал свежий, но пока не добрали quiet window.",
+          tone: "warn",
+        },
+        {
+          market: "Miami 79-80F",
+          outcome: "YES",
+          action: "SELL",
+          size: "$11.6",
+          price: "57.9c",
+          signalAgeSec: 142,
+          txHash: "0x1cc3...7b1e",
+          group: "agg-mia-79-80",
+          partialFills: 3,
+          note: "Lex снижает net size. Для follower это сигнал на уменьшение target.",
+          tone: "bad",
+        },
+      ],
+      positionRows: [
+        {
+          market: "NYC 61-62F",
+          outcome: "YES",
+          lexNetShares: 132,
+          myCurrentShares: 8.1,
+          midCents: 39.3,
+          bestBidCents: 38.8,
+          bestAskCents: 39.8,
+          avgEntryCents: 37.5,
+          signalAgeSec: 24,
+          partialFillCount: 4,
+          quietWindowLeftSec: 0,
+          depthUsd: 520,
+          wideMarket: false,
+          driftBlocked: false,
+          decisionTime: "15:42:26",
+          executionTime: "15:42:28",
+          executionPhase: "order_staged",
+          unrealizedPnlUsd: 1.46,
+        },
+        {
+          market: "Chicago 48-49F",
+          outcome: "YES",
+          lexNetShares: 72,
+          myCurrentShares: 5.8,
+          midCents: 44.6,
+          bestBidCents: 44.1,
+          bestAskCents: 45.0,
+          avgEntryCents: 43.8,
+          signalAgeSec: 71,
+          partialFillCount: 2,
+          quietWindowLeftSec: 19,
+          depthUsd: 118,
+          wideMarket: false,
+          driftBlocked: false,
+          decisionTime: "15:40:54",
+          executionTime: "15:40:54",
+          executionPhase: "quiet_window",
+          unrealizedPnlUsd: 0.32,
+        },
+        {
+          market: "Miami 79-80F",
+          outcome: "YES",
+          lexNetShares: 44,
+          myCurrentShares: 6.7,
+          midCents: 57.6,
+          bestBidCents: 57.1,
+          bestAskCents: 58.0,
+          avgEntryCents: 54.2,
+          signalAgeSec: 142,
+          partialFillCount: 3,
+          quietWindowLeftSec: 0,
+          depthUsd: 160,
+          wideMarket: false,
+          driftBlocked: false,
+          decisionTime: "15:40:02",
+          executionTime: "15:40:02",
+          executionPhase: "below_min_trade_notional",
+          unrealizedPnlUsd: 2.28,
+        },
+        {
+          market: "Seattle 54-55F",
+          outcome: "YES",
+          lexNetShares: 166,
+          myCurrentShares: 8.5,
+          midCents: 53.9,
+          bestBidCents: 52.8,
+          bestAskCents: 55.1,
+          avgEntryCents: 49.8,
+          signalAgeSec: 38,
+          partialFillCount: 5,
+          quietWindowLeftSec: 0,
+          depthUsd: 72,
+          wideMarket: true,
+          driftBlocked: true,
+          decisionTime: "15:39:17",
+          executionTime: "15:39:19",
+          executionPhase: "risk_block",
+          unrealizedPnlUsd: 3.48,
+        },
+      ],
+    };
+
+    const state = structuredClone(fallbackState);
+    let backendConnected = false;
+    let backendError = null;
+    let configSaveTimer = null;
+    let autoRefreshTimer = null;
+    const AUTO_REFRESH_MS = 15000;
+
+    function randomBetween(min, max, digits = 0) {
+      const value = min + Math.random() * (max - min);
+      return Number(value.toFixed(digits));
+    }
+
+    function shortTime(iso) {
+      const d = new Date(iso);
+      return d.toISOString().slice(11, 19) + "Z";
+    }
+
+    function fmtSignedMoney(value, digits = 1) {
+      const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+      return `${sign}$${Math.abs(value).toFixed(digits)}`;
+    }
+
+    function fmtUsd(value, digits = 0) {
+      return `$${Number(value).toFixed(digits)}`;
+    }
+
+    function fmtUsdPlain(value, digits = 2) {
+      return `$${Number(value).toFixed(digits)}`;
+    }
+
+    function fmtCents(value) {
+      return `${Number(value).toFixed(1)}c`;
+    }
+
+    function fmtShares(value) {
+      return `${value > 0 ? "+" : ""}${Number(value).toFixed(1)} sh`;
+    }
+
+    function toneClass(tone) {
+      if (tone === "good") return "good";
+      if (tone === "bad") return "bad";
+      return "warn";
+    }
+
+    function actionTone(action) {
+      if (action === "BUY" || action === "SELL") return "good";
+      if (action === "SKIP") return "bad";
+      return "warn";
+    }
+
+    function statusTone(status) {
+      if (status === "READY" || status === "EXECUTING") return "good";
+      if (status === "BLOCKED") return "bad";
+      return "warn";
+    }
+
+    function freeBudget() {
+      return Math.max(0, state.config.maxTotalExposure - state.follower.totalExposure);
+    }
+
+    function isLimitBreached() {
+      return state.follower.totalExposure > state.config.maxTotalExposure;
+    }
+
+    function sharesTarget(row) {
+      return Number((row.lexNetShares * state.config.scale).toFixed(1));
+    }
+
+    function deltaShares(row) {
+      return Number((sharesTarget(row) - row.myCurrentShares).toFixed(1));
+    }
+
+    function deltaNotional(row) {
+      return Number((Math.abs(deltaShares(row)) * row.midCents / 100).toFixed(2));
+    }
+
+    function lexNotional(row) {
+      return Number((row.lexNetShares * row.midCents / 100).toFixed(1));
+    }
+
+    function evaluateRow(row) {
+      const myTargetShares = sharesTarget(row);
+      const delta = deltaShares(row);
+      const notional = deltaNotional(row);
+      const limitBreached = isLimitBreached();
+      const quietGateCleared = row.quietWindowLeftSec === 0 || notional >= state.config.forceRebalanceNotionalUsd;
+      const canBuy = !limitBreached;
+
+      let action = "HOLD";
+      let status = "WAITING";
+      let reason = "Queue is waiting for a clearer execution window.";
+
+      if (row.signalAgeSec > state.config.maxSignalAgeSec) {
+        action = "SKIP";
+        status = "BLOCKED";
+        reason = "signalAgeSec exceeded maxSignalAgeSec, so this target update is stale.";
+      } else if (row.wideMarket && row.driftBlocked && state.config.skipWideMarket) {
+        action = "SKIP";
+        status = "BLOCKED";
+        reason = "skip_wide_market blocked this row because spread and drift are outside limits.";
+      } else if (delta > 0 && !canBuy) {
+        action = "HOLD";
+        status = "BLOCKED";
+        reason = "LIMIT BREACHED: new BUY blocked, bot restricted to HOLD/SELL only.";
+      } else if (Math.abs(delta) < 0.1) {
+        action = "HOLD";
+        status = "WAITING";
+        reason = "myCurrentShares already matches myTargetShares closely enough.";
+      } else if (notional < state.config.minTradeNotionalUsd) {
+        action = "HOLD";
+        status = "WAITING";
+        reason = `deltaNotional ${fmtUsdPlain(notional)} is below min_trade_notional_usd ${fmtUsdPlain(state.config.minTradeNotionalUsd)}.`;
+      } else if (!quietGateCleared) {
+        action = "HOLD";
+        status = "WAITING";
+        reason = `quiet window still has ${row.quietWindowLeftSec}s left and force_rebalance_notional_usd is not reached.`;
+      } else if (state.mode === "paused" && delta !== 0) {
+        action = delta > 0 ? "BUY" : "SELL";
+        status = "BLOCKED";
+        reason = "Execution paused. Target keeps updating, but market access is disabled.";
+      } else {
+        action = delta > 0 ? "BUY" : "SELL";
+        status = "READY";
+        reason = delta > 0
+          ? `Raise position toward myTargetShares; deltaNotional ${fmtUsdPlain(notional)} is tradable.`
+          : `Reduce position toward myTargetShares; deltaNotional ${fmtUsdPlain(notional)} is tradable.`;
+      }
+
+      return {
+        ...row,
+        myTargetShares,
+        deltaShares: delta,
+        deltaNotional: notional,
+        lexNetNotional: lexNotional(row),
+        bestBid: fmtCents(row.bestBidCents),
+        bestAsk: fmtCents(row.bestAskCents),
+        mid: fmtCents(row.midCents),
+        avgEntry: fmtCents(row.avgEntryCents),
+        currentMid: fmtCents(row.midCents),
+        depth: fmtUsd(row.depthUsd),
+        accumulatedLexNotional: fmtUsd(row.lexNetNotional ?? lexNotional(row), 1),
+        lastLeaderActivity: `${row.signalAgeSec}s`,
+        unrealizedPnl: fmtSignedMoney(row.unrealizedPnlUsd, 2),
+        action,
+        status,
+        reason,
+        checks: [
+          { label: "signal fresh", ok: row.signalAgeSec <= state.config.maxSignalAgeSec },
+          { label: "min_trade_notional_usd reached", ok: notional >= state.config.minTradeNotionalUsd },
+          { label: "quiet window clear / force_rebalance_notional_usd override", ok: quietGateCleared },
+          { label: "within exposure limit", ok: !limitBreached || delta <= 0 },
+          { label: "market liquid", ok: !(row.wideMarket && row.driftBlocked && state.config.skipWideMarket) },
+        ],
+      };
+    }
+
+    function getRows() {
+      return state.positionRows.map(evaluateRow);
+    }
+
+    function pendingRebalances(rows) {
+      return rows.filter((row) => row.status === "READY" || row.status === "WAITING").length;
+    }
+
+    function systemStates(rows) {
+      return [
+        {
+          name: "loading",
+          active: state.bot.runtime === "loading",
+          value: state.bot.runtime === "loading" ? "ACTIVE" : "STANDBY",
+          note: state.bot.runtime === "loading"
+            ? "Refreshing leader activity, positions snapshot and risk state."
+            : "Snapshot is idle and ready for the next backend poll.",
+          tone: state.bot.runtime === "loading" ? "warn" : "good",
+        },
+        {
+          name: "stale data",
+          active: rows.some((row) => row.signalAgeSec > state.config.maxSignalAgeSec),
+          value: rows.some((row) => row.signalAgeSec > state.config.maxSignalAgeSec) ? "ACTIVE" : "CLEAR",
+          note: rows.some((row) => row.signalAgeSec > state.config.maxSignalAgeSec)
+            ? "One or more targets exceeded maxSignalAgeSec and are blocked."
+            : "All visible rows are still inside the configured freshness window.",
+          tone: rows.some((row) => row.signalAgeSec > state.config.maxSignalAgeSec) ? "bad" : "good",
+        },
+        {
+          name: "sync error",
+          active: state.bot.health === "error",
+          value: state.bot.health === "error" ? "ACTIVE" : "CLEAR",
+          note: state.bot.health === "error"
+            ? "Leader activity or follower positions failed to reconcile."
+            : "Last target-position sync completed without hard errors.",
+          tone: state.bot.health === "error" ? "bad" : "good",
+        },
+        {
+          name: "api lagging",
+          active: state.bot.lagSec >= 5,
+          value: state.bot.lagSec >= 5 ? "ACTIVE" : "CLEAR",
+          note: state.bot.lagSec >= 5
+            ? `End-to-end lag is ${state.bot.lagSec.toFixed(1)}s and should be monitored.`
+            : `Current lag is ${state.bot.lagSec.toFixed(1)}s and stays inside the expected envelope.`,
+          tone: state.bot.lagSec >= 5 ? "warn" : "good",
+        },
+        {
+          name: "no positions",
+          active: rows.length === 0,
+          value: rows.length === 0 ? "ACTIVE" : "CLEAR",
+          note: rows.length === 0
+            ? "Follower currently has no copied positions."
+            : `${rows.length} open copied positions are present in the canonical model.`,
+          tone: rows.length === 0 ? "warn" : "good",
+        },
+        {
+          name: "execution paused",
+          active: state.mode === "paused",
+          value: state.mode === "paused" ? "ACTIVE" : "STANDBY",
+          note: state.mode === "paused"
+            ? "Decisioning continues, but BUY/SELL cannot leave the dashboard."
+            : "Pause state is wired and ready to block execution when needed.",
+          tone: state.mode === "paused" ? "bad" : "warn",
+        },
+      ];
+    }
+
+    function applySnapshot(snapshot) {
+      state.mode = snapshot.mode ?? state.mode;
+      state.bot = { ...state.bot, ...(snapshot.bot ?? {}) };
+      state.leader = { ...state.leader, ...(snapshot.leader ?? {}) };
+      state.follower = {
+        ...state.follower,
+        wallet: snapshot.follower?.wallet ?? state.follower.wallet,
+        totalExposure: Number(snapshot.follower?.totalExposure ?? state.follower.totalExposure),
+      };
+      state.config = { ...state.config, ...(snapshot.config ?? {}) };
+      state.stats = {
+        ...state.stats,
+        ...(snapshot.stats ?? {}),
+      };
+      state.leaderEvents = Array.isArray(snapshot.leaderEvents) ? snapshot.leaderEvents : state.leaderEvents;
+      state.positionRows = Array.isArray(snapshot.positions)
+        ? snapshot.positions
+        : Array.isArray(snapshot.rebalanceQueue)
+          ? snapshot.rebalanceQueue
+          : state.positionRows;
+    }
+
+    async function fetchJson(url, options = {}) {
+      const response = await fetch(url, {
+        headers: {
+          "Content-Type": "application/json",
+          ...(options.headers || {}),
+        },
+        cache: "no-store",
+        ...options,
+      });
+
+      if (!response.ok) {
+        let body = "";
+        try {
+          body = await response.text();
+        } catch (_error) {
+          body = "";
+        }
+        throw new Error(`${response.status} ${response.statusText}${body ? ` :: ${body.slice(0, 180)}` : ""}`);
+      }
+
+      return response.json();
+    }
+
+    async function loadBackendSnapshot({ showLoading = true } = {}) {
+      const previousRuntime = state.bot.runtime;
+      if (showLoading) {
+        state.bot.runtime = "loading";
+        renderAll();
+      }
+
+      try {
+        const snapshot = await fetchJson("/api/copytrade/snapshot");
+        applySnapshot(snapshot);
+        backendConnected = true;
+        backendError = null;
+        document.getElementById("refreshBtn").textContent = "Обновить backend";
+        document.getElementById("footerNote").textContent = "Живой backend подключён. Dashboard читает /api/copytrade/* и использует локальную симуляцию только как fallback.";
+      } catch (error) {
+        backendConnected = false;
+        backendError = error instanceof Error ? error.message : String(error);
+        state.bot.runtime = previousRuntime === "loading" ? "running" : previousRuntime;
+        state.bot.health = state.positionRows.length ? "warn" : state.bot.health;
+        document.getElementById("refreshBtn").textContent = "Обновить симуляцию";
+        document.getElementById("footerNote").textContent = `Backend недоступен, включён fallback: ${backendError}`;
+      }
+
+      renderAll();
+    }
+
+    async function postMode(mode) {
+      await fetchJson("/api/copytrade/mode", {
+        method: "POST",
+        body: JSON.stringify({ mode }),
+      });
+    }
+
+    async function postConfig() {
+      await fetchJson("/api/copytrade/config", {
+        method: "POST",
+        body: JSON.stringify(state.config),
+      });
+    }
+
+    function scheduleConfigPersist() {
+      if (!backendConnected) return;
+      if (configSaveTimer) window.clearTimeout(configSaveTimer);
+      configSaveTimer = window.setTimeout(async () => {
+        try {
+          await postConfig();
+          await loadBackendSnapshot({ showLoading: false });
+        } catch (error) {
+          backendConnected = false;
+          backendError = error instanceof Error ? error.message : String(error);
+          renderAll();
+        }
+      }, 250);
+    }
+
+    function startAutoRefresh() {
+      if (autoRefreshTimer) window.clearInterval(autoRefreshTimer);
+      autoRefreshTimer = window.setInterval(() => {
+        if (state.mode === "paused") return;
+        if (backendConnected) {
+          void loadBackendSnapshot({ showLoading: false });
+        } else {
+          void triggerRefresh();
+        }
+      }, AUTO_REFRESH_MS);
+    }
+
+    function renderHero(rows) {
+      document.getElementById("leaderName").textContent = state.leader.name;
+      document.getElementById("leaderWallet").textContent = `${state.leader.wallet.slice(0, 6)}...${state.leader.wallet.slice(-4)}`;
+      document.getElementById("followerWallet").textContent = `${state.follower.wallet.slice(0, 6)}...${state.follower.wallet.slice(-4)}`;
+
+      const backendLabel = backendConnected ? "backend live" : "fallback sim";
+      const errorSuffix = backendError ? ` · ${backendError.slice(0, 120)}` : "";
+      document.getElementById("syncStatus").textContent = `Bot ${state.bot.health}, лаг ${Number(state.bot.lagSec || 0).toFixed(1)}с, последний sync ${shortTime(state.bot.lastSyncAt)} · ${backendLabel}${errorSuffix}`;
+      document.getElementById("heroPnl").textContent = `${fmtSignedMoney(state.stats.mtmPnl)} MTM`;
+      document.getElementById("exposureBudget").textContent = `${fmtUsd(state.follower.totalExposure)} / ${fmtUsd(freeBudget())} free`;
+      document.getElementById("exposureNote").textContent = isLimitBreached()
+        ? "LIMIT BREACHED. New BUY blocked, bot restricted to HOLD/SELL only."
+        : backendConnected
+          ? "Backend snapshot загружен. Exposure и rebalance queue считаются из live state."
+          : "Работаем в fallback-симуляции, пока backend snapshot не ответил.";
+
+      const first = rows[0];
+      document.getElementById("latestDecision").textContent = first ? `${first.action} · ${first.status}` : "NO POSITIONS";
+      document.getElementById("latestDecisionNote").textContent = first ? first.reason : "Пока нет ни одной target row для принятия решения.";
+    }
+
+    function renderStats(rows) {
+      document.getElementById("metricLeaderActivity").textContent = String(state.leader.activity24h);
+      document.getElementById("metricWeatherSignals").textContent = String(state.leader.weatherActivity24h);
+      document.getElementById("metricPending").textContent = String(pendingRebalances(rows));
+      document.getElementById("metricProcessed").textContent = String(state.stats.processed24h);
+      document.getElementById("metricSkipped").textContent = String(state.stats.skipped24h);
+      document.getElementById("metricTracking").textContent = `${state.stats.trackingErrorPct.toFixed(1)}%`;
+      document.getElementById("metricSlippage").textContent = `${state.stats.avgSlippagePct.toFixed(1)}%`;
+      document.getElementById("metricPositions").textContent = String(rows.length);
+    }
+
+    function renderLeaderEvents() {
+      const root = document.getElementById("leaderEvents");
+      root.innerHTML = state.leaderEvents.map((event) => {
+        const size = event.size ?? fmtUsd(event.sizeUsd ?? 0, 1);
+        const price = event.price ?? fmtCents(event.priceCents ?? 0);
+        return `
+        <article class="event-item">
+          <div class="event-head">
+            <div class="event-title">${event.market} · ${event.outcome} · ${event.action}</div>
+            <div class="tag tag-${toneClass(event.tone)}">${event.signalAgeSec}s</div>
+          </div>
+          <div class="event-meta">${event.note}</div>
+          <div class="split">
+            <div class="pill"><span class="pill-label">Size</span><strong>${size}</strong></div>
+            <div class="pill"><span class="pill-label">Price</span><strong>${price}</strong></div>
+            <div class="pill"><span class="pill-label">Tx</span><strong class="mono">${event.txHash}</strong></div>
+            <div class="pill"><span class="pill-label">Group</span><strong class="mono">${event.group}</strong></div>
+            <div class="pill"><span class="pill-label">Partial fills</span><strong>${event.partialFills}</strong></div>
+          </div>
+        </article>
+      `;
+      }).join("");
+    }
+
+    function renderSystemStates(rows) {
+      const root = document.getElementById("systemStateGrid");
+      root.innerHTML = systemStates(rows).map((item) => `
+        <article class="system-card">
+          <div class="system-head">
+            <div class="system-name">${item.name}</div>
+            <div class="tag tag-${toneClass(item.tone)}">${item.value}</div>
+          </div>
+          <div class="system-value">${item.active ? "Visible" : "Ready"}</div>
+          <div class="system-note">${item.note}</div>
+        </article>
+      `).join("");
+    }
+
+    function renderRebalanceQueue(rows) {
+      const root = document.getElementById("rebalanceQueue");
+      root.innerHTML = rows.map((row) => `
+        <article class="queue-item">
+          <div class="queue-head">
+            <div class="queue-title">${row.market} · ${row.outcome}</div>
+            <div class="tag-pair">
+              <div class="tag tag-${actionTone(row.action)}">Action: ${row.action}</div>
+              <div class="tag tag-${statusTone(row.status)}">Status: ${row.status}</div>
+            </div>
+          </div>
+          <div class="queue-meta">${row.reason}</div>
+          <div class="split">
+            <div class="pill"><span class="pill-key">lexNetShares</span><strong>${row.lexNetShares} sh</strong></div>
+            <div class="pill"><span class="pill-key">myCurrentShares</span><strong>${row.myCurrentShares.toFixed(1)} sh</strong></div>
+            <div class="pill"><span class="pill-key">myTargetShares</span><strong>${row.myTargetShares.toFixed(1)} sh</strong></div>
+            <div class="pill"><span class="pill-key">deltaShares</span><strong>${fmtShares(row.deltaShares)}</strong></div>
+            <div class="pill"><span class="pill-key">deltaNotional</span><strong>${fmtUsdPlain(row.deltaNotional)}</strong></div>
+            <div class="pill"><span class="pill-label">Signal age</span><strong>${row.signalAgeSec}s</strong></div>
+            <div class="pill"><span class="pill-label">Partial fills</span><strong>${row.partialFillCount}</strong></div>
+            <div class="pill"><span class="pill-label">Quiet window</span><strong>${row.quietWindowLeftSec ? `${row.quietWindowLeftSec}s left` : "done"}</strong></div>
+          </div>
+        </article>
+      `).join("");
+    }
+
+    function renderTargetState(rows) {
+      const root = document.getElementById("targetStateGrid");
+      root.innerHTML = rows.map((row) => `
+        <article class="state-card">
+          <div class="status-label">${row.market}</div>
+          <div class="state-value">${fmtShares(row.deltaShares)}</div>
+          <div class="split" style="margin-top:10px">
+            <div class="pill"><span class="pill-key">lexNetShares</span><strong>${row.lexNetShares}</strong></div>
+            <div class="pill"><span class="pill-key">myCurrentShares</span><strong>${row.myCurrentShares.toFixed(1)}</strong></div>
+            <div class="pill"><span class="pill-key">myTargetShares</span><strong>${row.myTargetShares.toFixed(1)}</strong></div>
+            <div class="pill"><span class="pill-key">deltaNotional</span><strong>${fmtUsdPlain(row.deltaNotional)}</strong></div>
+          </div>
+          <div class="state-note">${row.reason}</div>
+        </article>
+      `).join("");
+    }
+
+    function renderAggregationState(rows) {
+      const root = document.getElementById("aggregationState");
+      root.innerHTML = rows.map((row) => `
+        <article class="agg-card">
+          <div class="status-label">${row.market} · ${row.outcome}</div>
+          <div class="state-value">${row.partialFillCount}</div>
+          <div class="state-note">partial fills в текущем окне агрегации</div>
+          <div class="split">
+            <div class="pill"><span class="pill-label">Accum lex notional</span><strong>${fmtUsd(row.lexNetNotional, 1)}</strong></div>
+            <div class="pill"><span class="pill-key">myTargetShares</span><strong>${row.myTargetShares.toFixed(1)} sh</strong></div>
+            <div class="pill"><span class="pill-key">deltaShares</span><strong>${fmtShares(row.deltaShares)}</strong></div>
+            <div class="pill"><span class="pill-key">deltaNotional</span><strong>${fmtUsdPlain(row.deltaNotional)}</strong></div>
+            <div class="pill"><span class="pill-key">min_trade_notional_usd</span><strong>${fmtUsdPlain(state.config.minTradeNotionalUsd)}</strong></div>
+            <div class="pill"><span class="pill-key">force_rebalance_notional_usd</span><strong>${fmtUsdPlain(state.config.forceRebalanceNotionalUsd)}</strong></div>
+          </div>
+        </article>
+      `).join("");
+    }
+
+    function renderDecisionTrace(rows) {
+      const root = document.getElementById("decisionTrace");
+      root.innerHTML = rows.map((row) => `
+        <article class="trace-item">
+          <div class="trace-head">
+            <div class="trace-title">${row.market} · ${row.outcome}</div>
+            <div class="tag-pair">
+              <div class="tag tag-${actionTone(row.action)}">Action: ${row.action}</div>
+              <div class="tag tag-${statusTone(row.status)}">Status: ${row.status}</div>
+            </div>
+          </div>
+          <div class="trace-copy">${row.reason}</div>
+          <div class="split" style="margin-top:10px">
+            <div class="pill"><span class="pill-key">lexNetShares</span><strong>${row.lexNetShares} sh</strong></div>
+            <div class="pill"><span class="pill-key">myCurrentShares</span><strong>${row.myCurrentShares.toFixed(1)} sh</strong></div>
+            <div class="pill"><span class="pill-key">myTargetShares</span><strong>${row.myTargetShares.toFixed(1)} sh</strong></div>
+            <div class="pill"><span class="pill-key">deltaShares</span><strong>${fmtShares(row.deltaShares)}</strong></div>
+            <div class="pill"><span class="pill-key">deltaNotional</span><strong>${fmtUsdPlain(row.deltaNotional)}</strong></div>
+          </div>
+          <div class="trace-checks" style="margin-top:10px">
+            ${row.checks.map((check) => `<div class="trace-check ${check.ok ? "good" : "warn"}">${check.ok ? "OK" : "WAIT"} ${check.label}</div>`).join("")}
+          </div>
+        </article>
+      `).join("");
+    }
+
+    function renderPositions(rows) {
+      const root = document.getElementById("positionsTable");
+      root.innerHTML = rows.map((row) => `
+        <tr>
+          <td>${row.market}</td>
+          <td>${row.outcome}</td>
+          <td>${row.lexNetShares}</td>
+          <td>${row.myCurrentShares.toFixed(1)}</td>
+          <td>${row.myTargetShares.toFixed(1)}</td>
+          <td>${fmtShares(row.deltaShares)}</td>
+          <td>${fmtUsdPlain(row.deltaNotional)}</td>
+          <td>${row.avgEntry}</td>
+          <td>${row.currentMid}</td>
+          <td>${row.unrealizedPnl}</td>
+          <td>${row.lastLeaderActivity}</td>
+          <td><span class="tag tag-${actionTone(row.action)}">${row.action}</span></td>
+          <td><span class="tag tag-${statusTone(row.status)}">${row.status}</span></td>
+          <td>${row.reason}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderMarkets(rows) {
+      const root = document.getElementById("marketGrid");
+      root.innerHTML = rows.map((row) => `
+        <article class="market-card">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+            <div>
+              <div class="section-kicker">${row.market}</div>
+              <div class="market-title" style="margin-top:8px">${row.outcome}</div>
+            </div>
+            <div class="tag-pair">
+              <div class="tag tag-${actionTone(row.action)}">Action: ${row.action}</div>
+              <div class="tag tag-${statusTone(row.status)}">Status: ${row.status}</div>
+            </div>
+          </div>
+          <div class="market-copy" style="margin-top:10px">${row.reason}</div>
+          <div class="market-stats">
+            <div class="market-stat"><span class="pill-key">lexNetShares</span><b>${row.lexNetShares} sh</b></div>
+            <div class="market-stat"><span class="status-label">lexNetNotional</span><b>${fmtUsd(row.lexNetNotional, 1)}</b></div>
+            <div class="market-stat"><span class="pill-key">myCurrentShares</span><b>${row.myCurrentShares.toFixed(1)} sh</b></div>
+            <div class="market-stat"><span class="pill-key">myTargetShares</span><b>${row.myTargetShares.toFixed(1)} sh</b></div>
+            <div class="market-stat"><span class="pill-key">deltaShares</span><b>${fmtShares(row.deltaShares)}</b></div>
+            <div class="market-stat"><span class="pill-key">deltaNotional</span><b>${fmtUsdPlain(row.deltaNotional)}</b></div>
+            <div class="market-stat"><span class="status-label">Bid / Ask</span><b>${row.bestBid} / ${row.bestAsk}</b></div>
+            <div class="market-stat"><span class="status-label">Mid / Depth</span><b>${row.mid} · ${row.depth}</b></div>
+            <div class="market-stat"><span class="status-label">Signal age</span><b>${row.signalAgeSec}s</b></div>
+            <div class="market-stat"><span class="status-label">Partial fills</span><b>${row.partialFillCount}</b></div>
+          </div>
+        </article>
+      `).join("");
+    }
+
+    function renderRiskBars(rows) {
+      const totalExposurePct = Math.min(100, (state.follower.totalExposure / state.config.maxTotalExposure) * 100);
+      const freeBudgetPct = Math.min(100, (freeBudget() / Math.max(state.config.maxTotalExposure, 1)) * 100);
+      const pendingPct = Math.min(100, (pendingRebalances(rows) / 8) * 100);
+      const pnlPct = Math.max(8, Math.min(100, ((state.stats.mtmPnl + 40) / 80) * 100));
+      const breach = isLimitBreached();
+
+      document.getElementById("totalExposureLabel").textContent = `$${state.follower.totalExposure} / $${state.config.maxTotalExposure}`;
+      document.getElementById("freeBudgetLabel").textContent = `$${freeBudget()}`;
+      document.getElementById("pendingLabel").textContent = `${pendingRebalances(rows)} / 8`;
+      document.getElementById("pnlSplitLabel").textContent = `R $${state.stats.realizedPnl.toFixed(1)} / U $${state.stats.unrealizedPnl.toFixed(1)} / MTM $${state.stats.mtmPnl.toFixed(1)}`;
+
+      const totalExposureBar = document.getElementById("totalExposureBar");
+      totalExposureBar.style.width = `${totalExposurePct}%`;
+      totalExposureBar.className = `progress-fill${breach ? " bad" : totalExposurePct > 80 ? " warn" : ""}`;
+
+      document.getElementById("freeBudgetBar").style.width = `${freeBudgetPct}%`;
+      document.getElementById("pendingBar").style.width = `${pendingPct}%`;
+      document.getElementById("pnlBar").style.width = `${pnlPct}%`;
+
+      document.getElementById("botHealthTag").textContent = `Bot health: ${state.bot.health}`;
+      document.getElementById("botHealthTag").className = `tag tag-${state.bot.health === "ok" ? "good" : state.bot.health === "warn" ? "warn" : "bad"}`;
+      document.getElementById("limitStateTag").textContent = breach ? "LIMIT BREACHED" : "Within limits";
+      document.getElementById("limitStateTag").className = `tag ${breach ? "tag-bad" : "tag-good"}`;
+    }
+
+    function renderDecisionLog(rows) {
+      const root = document.getElementById("decisionLog");
+      root.innerHTML = rows.map((row) => `
+        <article class="log-item">
+          <div class="log-head">
+            <div class="queue-title">${row.market}</div>
+            <div class="tag-pair">
+              <div class="tag tag-${actionTone(row.action)}">Action: ${row.action}</div>
+              <div class="tag tag-${statusTone(row.status)}">Status: ${row.status}</div>
+            </div>
+          </div>
+          <div class="log-body">
+            <strong>${row.decisionTime}</strong> · lexNetShares ${row.lexNetShares} sh, myCurrentShares ${row.myCurrentShares.toFixed(1)} sh, myTargetShares ${row.myTargetShares.toFixed(1)} sh, deltaShares ${fmtShares(row.deltaShares)}, deltaNotional ${fmtUsdPlain(row.deltaNotional)}.
+          </div>
+        </article>
+      `).join("");
+    }
+
+    function executionStatus(row) {
+      if (row.action === "BUY" || row.action === "SELL") {
+        return state.mode === "paper" || state.mode === "real" ? "EXECUTING" : "READY";
+      }
+      return row.status;
+    }
+
+    function renderExecutionLog(rows) {
+      const root = document.getElementById("executionLog");
+      root.innerHTML = rows.map((row) => `
+        <article class="exec-row">
+          <div class="exec-head">
+            <div class="queue-title">${row.market}</div>
+            <div class="tag-pair">
+              <div class="tag tag-${actionTone(row.action)}">Action: ${row.action}</div>
+              <div class="tag tag-${statusTone(executionStatus(row))}">Status: ${executionStatus(row)}</div>
+            </div>
+          </div>
+          <div class="exec-body">
+            <strong>${row.executionTime}</strong> · ${row.executionPhase} · lexNetShares ${row.lexNetShares} sh, myCurrentShares ${row.myCurrentShares.toFixed(1)} sh, myTargetShares ${row.myTargetShares.toFixed(1)} sh, deltaShares ${fmtShares(row.deltaShares)}, deltaNotional ${fmtUsdPlain(row.deltaNotional)}.
+          </div>
+        </article>
+      `).join("");
+    }
+
+    function syncConfigView() {
+      const scaleText = `${state.config.scale.toFixed(2)}x`;
+      document.getElementById("scaleValue").textContent = scaleText;
+      document.getElementById("configScalePill").textContent = scaleText;
+      document.getElementById("quickScale").textContent = scaleText;
+
+      document.getElementById("minTradeValue").textContent = fmtUsd(state.config.minTradeNotionalUsd);
+      document.getElementById("configMinPill").textContent = fmtUsd(state.config.minTradeNotionalUsd);
+
+      document.getElementById("forceThresholdValue").textContent = fmtUsd(state.config.forceRebalanceNotionalUsd);
+      document.getElementById("quietValue").textContent = `${state.config.quietWindowSec}s`;
+      document.getElementById("quickQuiet").textContent = `${state.config.quietWindowSec}s`;
+
+      document.getElementById("rebalanceWindowValue").textContent = `${state.config.rebalanceWindowSec}s`;
+      document.getElementById("configRebalancePill").textContent = `${state.config.rebalanceWindowSec}s`;
+
+      document.getElementById("signalAgeValue").textContent = `${state.config.maxSignalAgeSec}s`;
+      document.getElementById("quickSignalAge").textContent = `${state.config.maxSignalAgeSec}s`;
+
+      document.getElementById("slippageValue").textContent = `${state.config.maxSlippagePct.toFixed(1)}%`;
+      document.getElementById("priceDriftValue").textContent = `${state.config.maxPriceDriftPct.toFixed(1)}%`;
+      document.getElementById("totalExposureValue").textContent = fmtUsd(state.config.maxTotalExposure);
+      document.getElementById("marketExposureValue").textContent = fmtUsd(state.config.maxMarketExposure);
+
+      document.getElementById("scaleRange").value = state.config.scale.toFixed(2);
+      document.getElementById("minTradeRange").value = String(state.config.minTradeNotionalUsd);
+      document.getElementById("forceThresholdRange").value = String(state.config.forceRebalanceNotionalUsd);
+      document.getElementById("quietRange").value = String(state.config.quietWindowSec);
+      document.getElementById("rebalanceWindowRange").value = String(state.config.rebalanceWindowSec);
+      document.getElementById("signalAgeRange").value = String(state.config.maxSignalAgeSec);
+      document.getElementById("slippageRange").value = state.config.maxSlippagePct.toFixed(1);
+      document.getElementById("priceDriftRange").value = state.config.maxPriceDriftPct.toFixed(1);
+      document.getElementById("totalExposureRange").value = String(state.config.maxTotalExposure);
+      document.getElementById("marketExposureRange").value = String(state.config.maxMarketExposure);
+
+      document.getElementById("toggleCopyEntries").className = `toggle${state.config.copyEntries ? " on" : ""}`;
+      document.getElementById("toggleCopyExits").className = `toggle${state.config.copyExits ? " on" : ""}`;
+      document.getElementById("toggleCopyNoSide").className = `toggle${state.config.copyNoSide ? " on" : ""}`;
+      document.getElementById("toggleWideMarket").className = `toggle${state.config.skipWideMarket ? " on" : ""}`;
+      document.getElementById("toggleCooldown").className = `toggle${state.config.respectCooldown ? " on" : ""}`;
+      document.getElementById("toggleWeatherOnly").className = `toggle${state.config.weatherOnly ? " on" : ""}`;
+    }
+
+    function bindConfig() {
+      const ranges = [
+        ["scaleRange", "scale", Number],
+        ["minTradeRange", "minTradeNotionalUsd", Number],
+        ["forceThresholdRange", "forceRebalanceNotionalUsd", Number],
+        ["quietRange", "quietWindowSec", Number],
+        ["rebalanceWindowRange", "rebalanceWindowSec", Number],
+        ["signalAgeRange", "maxSignalAgeSec", Number],
+        ["slippageRange", "maxSlippagePct", Number],
+        ["priceDriftRange", "maxPriceDriftPct", Number],
+        ["totalExposureRange", "maxTotalExposure", Number],
+        ["marketExposureRange", "maxMarketExposure", Number],
+      ];
+
+      ranges.forEach(([id, key, parser]) => {
+        const el = document.getElementById(id);
+        el.addEventListener("input", () => {
+          state.config[key] = parser(el.value);
+          renderAll();
+        });
+        el.addEventListener("change", () => {
+          state.config[key] = parser(el.value);
+          scheduleConfigPersist();
+        });
+      });
+
+      [
+        ["toggleCopyEntries", "copyEntries"],
+        ["toggleCopyExits", "copyExits"],
+        ["toggleCopyNoSide", "copyNoSide"],
+        ["toggleWideMarket", "skipWideMarket"],
+        ["toggleCooldown", "respectCooldown"],
+        ["toggleWeatherOnly", "weatherOnly"],
+      ].forEach(([id, key]) => {
+        document.getElementById(id).addEventListener("click", () => {
+          state.config[key] = !state.config[key];
+          renderAll();
+          scheduleConfigPersist();
+        });
+      });
+
+      document.getElementById("scaleRange").value = state.config.scale.toFixed(2);
+      document.getElementById("minTradeRange").value = String(state.config.minTradeNotionalUsd);
+      document.getElementById("forceThresholdRange").value = String(state.config.forceRebalanceNotionalUsd);
+      document.getElementById("quietRange").value = String(state.config.quietWindowSec);
+      document.getElementById("rebalanceWindowRange").value = String(state.config.rebalanceWindowSec);
+      document.getElementById("signalAgeRange").value = String(state.config.maxSignalAgeSec);
+      document.getElementById("slippageRange").value = state.config.maxSlippagePct.toFixed(1);
+      document.getElementById("priceDriftRange").value = state.config.maxPriceDriftPct.toFixed(1);
+      document.getElementById("totalExposureRange").value = String(state.config.maxTotalExposure);
+      document.getElementById("marketExposureRange").value = String(state.config.maxMarketExposure);
+    }
+
+    function setMode(mode) {
+      state.mode = mode;
+      document.querySelectorAll("[data-mode]").forEach((button) => {
+        button.classList.toggle("active", button.dataset.mode === mode);
+      });
+
+      const heroMode = document.getElementById("heroMode");
+      const heroReason = document.getElementById("heroReason");
+      const queueTag = document.getElementById("queueTag");
+
+      if (mode === "observer") {
+        heroMode.textContent = "Observer";
+        heroReason.textContent = "Только читаем activity и считаем target. Ни решения, ни paper execution дальше не идут.";
+        queueTag.textContent = "Observer only";
+        queueTag.className = "tag tag-muted";
+      } else if (mode === "dry-run") {
+        heroMode.textContent = "Dry-run";
+        heroReason.textContent = "Бот строит target position, считает delta и пишет action/status без реальной отправки ордеров.";
+        queueTag.textContent = "Dry-run decision flow";
+        queueTag.className = "tag tag-warn";
+      } else if (mode === "paper") {
+        heroMode.textContent = "Paper";
+        heroReason.textContent = "Решение проходит в mock execution, можно мерить tracking quality и expected slippage без риска.";
+        queueTag.textContent = "Paper execution";
+        queueTag.className = "tag tag-good";
+      } else if (mode === "real") {
+        heroMode.textContent = "Real";
+        heroReason.textContent = "Реальный position copier. На первом месте свежесть сигнала, exposure и контроль quiet window.";
+        queueTag.textContent = "Real execution";
+        queueTag.className = "tag tag-good";
+      } else {
+        heroMode.textContent = "Paused";
+        heroReason.textContent = "Исполнение остановлено. Activity продолжаем читать, target продолжаем считать, но BUY/SELL остаются только в dashboard state.";
+        queueTag.textContent = "Execution paused";
+        queueTag.className = "tag tag-bad";
+      }
+    }
+
+    function bindModes() {
+      document.querySelectorAll("[data-mode]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const mode = button.dataset.mode;
+          setMode(mode);
+          renderAll();
+          if (!backendConnected) return;
+          try {
+            await postMode(mode);
+            await loadBackendSnapshot({ showLoading: false });
+          } catch (error) {
+            backendConnected = false;
+            backendError = error instanceof Error ? error.message : String(error);
+            renderAll();
+          }
+        });
+      });
+
+      document.getElementById("realBtn").addEventListener("click", async () => {
+        setMode("real");
+        renderAll();
+        if (!backendConnected) return;
+        try {
+          await postMode("real");
+          await loadBackendSnapshot({ showLoading: false });
+        } catch (error) {
+          backendConnected = false;
+          backendError = error instanceof Error ? error.message : String(error);
+          renderAll();
+        }
+      });
+      document.getElementById("pauseBtn").addEventListener("click", async () => {
+        const nextMode = state.mode === "paused" ? "dry-run" : "paused";
+        setMode(nextMode);
+        renderAll();
+        if (!backendConnected) return;
+        try {
+          if (nextMode === "paused") {
+            await fetchJson("/api/copytrade/control/pause", { method: "POST", body: JSON.stringify({ reason: "Paused from dashboard" }) });
+          } else {
+            await fetchJson("/api/copytrade/control/resume", { method: "POST" });
+          }
+          await loadBackendSnapshot({ showLoading: false });
+        } catch (error) {
+          backendConnected = false;
+          backendError = error instanceof Error ? error.message : String(error);
+          renderAll();
+        }
+      });
+    }
+
+    function refreshSimulation() {
+      state.bot.runtime = "running";
+      state.bot.lagSec = randomBetween(1.2, 5.8, 1);
+      state.bot.lastSyncAt = new Date().toISOString();
+      state.bot.health = ["ok", "ok", "warn", "ok", "error"][Math.floor(Math.random() * 5)];
+
+      state.leader.activity24h = Math.max(12, state.leader.activity24h + Math.round(randomBetween(-1, 2)));
+      state.leader.weatherActivity24h = Math.max(8, Math.min(state.leader.activity24h, state.leader.weatherActivity24h + Math.round(randomBetween(-1, 2))));
+
+      state.stats.processed24h = Math.max(10, state.stats.processed24h + Math.round(randomBetween(0, 2)));
+      state.stats.skipped24h = Math.max(2, Math.min(9, state.stats.skipped24h + Math.round(randomBetween(-1, 1))));
+      state.stats.held24h = Math.max(1, Math.min(6, state.stats.held24h + Math.round(randomBetween(-1, 1))));
+      state.stats.trackingErrorPct = randomBetween(1.4, 4.8, 1);
+      state.stats.avgSlippagePct = randomBetween(0.3, 1.4, 1);
+      state.stats.realizedPnl = randomBetween(1.5, 9.5, 1);
+      state.stats.unrealizedPnl = randomBetween(10.2, 24.5, 1);
+      state.stats.mtmPnl = Number((state.stats.realizedPnl + state.stats.unrealizedPnl).toFixed(1));
+      state.follower.totalExposure = Math.round(randomBetween(102, 138, 0));
+
+      state.positionRows = state.positionRows.map((row, index) => {
+        const signalAgeSec = Math.max(8, row.signalAgeSec + Math.round(randomBetween(6, 18)));
+        const quietWindowLeftSec = row.quietWindowLeftSec > 0 ? Math.max(0, row.quietWindowLeftSec - Math.round(randomBetween(8, 20))) : 0;
+        const lexNetShares = Math.max(20, Math.round(row.lexNetShares + randomBetween(-8, 12)));
+        const myCurrentShares = Math.max(0.4, Number((row.myCurrentShares + randomBetween(-0.6, 0.6, 1)).toFixed(1)));
+        const midCents = randomBetween(37.5, 58.9, 1);
+        const spread = row.wideMarket ? randomBetween(1.8, 3.1, 1) : randomBetween(0.6, 1.2, 1);
+        const bestBidCents = Number((midCents - spread / 2).toFixed(1));
+        const bestAskCents = Number((midCents + spread / 2).toFixed(1));
+        const depthUsd = row.wideMarket ? Math.round(randomBetween(60, 120, 0)) : Math.round(randomBetween(110, 560, 0));
+        const decisionTime = index === 0 ? shortTime(state.bot.lastSyncAt).replace("Z", "") : row.decisionTime;
+        const executionTime = index === 0 ? shortTime(state.bot.lastSyncAt).replace("Z", "") : row.executionTime;
+        const executionPhase = row.wideMarket
+          ? "risk_block"
+          : quietWindowLeftSec > 0
+            ? "quiet_window"
+            : "order_staged";
+
+        return {
+          ...row,
+          signalAgeSec,
+          quietWindowLeftSec,
+          lexNetShares,
+          myCurrentShares,
+          midCents,
+          bestBidCents,
+          bestAskCents,
+          depthUsd,
+          partialFillCount: Math.max(1, row.partialFillCount + Math.round(randomBetween(0, 1))),
+          decisionTime,
+          executionTime,
+          executionPhase,
+          unrealizedPnlUsd: Number(randomBetween(-1.2, 4.8, 2)),
+        };
+      });
+
+      const newest = state.positionRows[0];
+      state.leaderEvents.unshift({
+        market: newest.market,
+        outcome: newest.outcome,
+        action: deltaShares(newest) >= 0 ? "BUY" : "SELL",
+        size: fmtUsd(randomBetween(4.5, 18.9, 1), 1),
+        price: fmtCents(newest.midCents),
+        signalAgeSec: Math.max(8, Math.round(randomBetween(12, 44))),
+        txHash: `0x${Math.random().toString(16).slice(2, 6)}...${Math.random().toString(16).slice(2, 6)}`,
+        group: `agg-${newest.market.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+        partialFills: Math.max(1, Math.round(randomBetween(2, 6))),
+        note: `Новый fill обновил lexNetShares, а follower target пересчитан через scale ${state.config.scale.toFixed(2)}x.`,
+        tone: newest.wideMarket ? "warn" : "good",
+      });
+      state.leaderEvents = state.leaderEvents.slice(0, 4);
+
+      renderAll();
+    }
+
+    async function triggerRefresh() {
+      if (backendConnected) {
+        state.bot.runtime = "loading";
+        renderAll();
+        try {
+          await fetchJson("/api/copytrade/control/refresh", { method: "POST" });
+          await loadBackendSnapshot({ showLoading: false });
+          return;
+        } catch (error) {
+          backendConnected = false;
+          backendError = error instanceof Error ? error.message : String(error);
+        }
+      }
+
+      state.bot.runtime = "loading";
+      renderAll();
+      window.setTimeout(refreshSimulation, 420);
+    }
+
+    function renderAll() {
+      const rows = getRows();
+      renderHero(rows);
+      renderStats(rows);
+      renderLeaderEvents();
+      renderSystemStates(rows);
+      renderRebalanceQueue(rows);
+      renderTargetState(rows);
+      renderAggregationState(rows);
+      renderDecisionTrace(rows);
+      renderPositions(rows);
+      renderMarkets(rows);
+      renderRiskBars(rows);
+      renderDecisionLog(rows);
+      renderExecutionLog(rows);
+      syncConfigView();
+    }
+
+    document.getElementById("refreshBtn").addEventListener("click", () => {
+      void triggerRefresh();
+    });
+
+    bindModes();
+    bindConfig();
+    setMode(state.mode);
+    renderAll();
+    startAutoRefresh();
+    void loadBackendSnapshot({ showLoading: false });
+  </script>
+</body>
+</html>
