@@ -258,6 +258,10 @@ const persistence = {
   lastRefreshOkAt: null as string | null,
   lastRefreshError: null as string | null,
 };
+const runtimeLogs = {
+  decisionLog: [] as CopytradeEvaluatedRow[],
+  executionLog: [] as CopytradeEvaluatedRow[],
+};
 let refreshPromise: Promise<CopytradeSnapshot> | null = null;
 let initPromise: Promise<void> | null = null;
 let initializedFromStore = false;
@@ -325,14 +329,109 @@ function recordActivityMetadata(activity: RawActivity[]) {
   persistence.dedupKeys = dedupKeys;
 }
 
+function mergeRowsByKey(
+  freshRows: CopytradeEvaluatedRow[],
+  existingRows: CopytradeEvaluatedRow[],
+  keyFn: (row: CopytradeEvaluatedRow) => string,
+  limit = 20,
+) {
+  const merged: CopytradeEvaluatedRow[] = [];
+  const seen = new Set<string>();
+
+  for (const row of [...freshRows, ...existingRows]) {
+    const key = keyFn(row);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(structuredClone(row));
+    if (merged.length >= limit) {
+      break;
+    }
+  }
+
+  return merged;
+}
+
+function decisionLogKey(row: CopytradeEvaluatedRow) {
+  return [
+    row.conditionId,
+    row.outcome,
+    row.action,
+    row.status,
+    row.myCurrentShares,
+    row.myTargetShares,
+    row.deltaShares,
+    row.reason,
+  ].join('|');
+}
+
+function executionLedgerKey(row: CopytradeEvaluatedRow) {
+  return [
+    row.conditionId,
+    row.outcome,
+    row.action,
+    row.myCurrentShares,
+    row.myTargetShares,
+    row.deltaShares,
+    row.deltaNotional,
+    row.executionPhase,
+  ].join('|');
+}
+
+function buildExecutionLedgerEntries(rows: CopytradeEvaluatedRow[]) {
+  if ((state.mode !== 'paper' && state.mode !== 'real') || persistence.activityCursorSec === null) {
+    return [] as CopytradeEvaluatedRow[];
+  }
+
+  const executionTime = clockTime();
+  const executionPhase = state.mode === 'paper' ? 'paper_order_staged' : 'real_order_staged';
+  const reasonPrefix = state.mode === 'paper'
+    ? 'Paper ledger staged'
+    : 'Live execution staged';
+
+  return rows
+    .filter((row) => (row.action === 'BUY' || row.action === 'SELL') && row.status === 'READY')
+    .map((row): CopytradeEvaluatedRow => ({
+      ...row,
+      status: "EXECUTING",
+      executionStatus: "EXECUTING",
+      executionTime,
+      executionPhase,
+      reason: `${reasonPrefix} ${row.action} toward myTargetShares without mutating follower wallet state yet.`,
+    }));
+}
+
+function syncRuntimeLogs(rows: CopytradeEvaluatedRow[]) {
+  runtimeLogs.decisionLog = mergeRowsByKey(rows, runtimeLogs.decisionLog, decisionLogKey, 40);
+
+  const executionEntries = buildExecutionLedgerEntries(rows);
+  if (executionEntries.length > 0) {
+    runtimeLogs.executionLog = mergeRowsByKey(executionEntries, runtimeLogs.executionLog, executionLedgerKey, 40);
+  }
+}
+
+function snapshotDecisionLog(rows: CopytradeEvaluatedRow[]) {
+  return runtimeLogs.decisionLog.length > 0
+    ? structuredClone(runtimeLogs.decisionLog)
+    : structuredClone(rows);
+}
+
+function snapshotExecutionLog(rows: CopytradeEvaluatedRow[]) {
+  return runtimeLogs.executionLog.length > 0
+    ? structuredClone(runtimeLogs.executionLog)
+    : structuredClone(rows);
+}
+
 async function persistCurrentState() {
   const rows = getRows();
+  syncRuntimeLogs(rows);
   await saveCopytradeStateStore({
     state: structuredClone(state),
     activityCursorSec: persistence.activityCursorSec,
     dedupKeys: [...persistence.dedupKeys],
-    decisionLog: rows,
-    executionLog: rows,
+    decisionLog: snapshotDecisionLog(rows),
+    executionLog: runtimeLogs.executionLog.length > 0 ? structuredClone(runtimeLogs.executionLog) : [],
     refreshCount: persistence.refreshCount,
     lastRefreshAt: persistence.lastRefreshAt,
     lastRefreshOkAt: persistence.lastRefreshOkAt,
@@ -366,6 +465,8 @@ export async function initializeCopytradeState(options?: { force?: boolean }) {
     persistence.lastRefreshAt = persisted.lastRefreshAt;
     persistence.lastRefreshOkAt = persisted.lastRefreshOkAt;
     persistence.lastRefreshError = persisted.lastRefreshError;
+    runtimeLogs.decisionLog = structuredClone(persisted.decisionLog);
+    runtimeLogs.executionLog = structuredClone(persisted.executionLog);
     initializedFromStore = true;
     logWithTime("copytrade", `restored persisted state rows=${state.positionRows.length} updatedAt=${persisted.updatedAt}`);
   })()
@@ -1005,6 +1106,8 @@ function applyLiveRefresh(activity: RawActivity[], followerPositions: RawPositio
 
 export function getCopytradeSnapshot(): CopytradeSnapshot {
   const rows = getRows();
+  const decisionLog = snapshotDecisionLog(rows);
+  const executionLog = snapshotExecutionLog(rows);
   const latestDecision = rows[0]
     ? {
       market: rows[0].market,
@@ -1038,8 +1141,8 @@ export function getCopytradeSnapshot(): CopytradeSnapshot {
     decisionTrace: rows,
     positions: rows,
     markets: rows,
-    decisionLog: rows,
-    executionLog: rows,
+    decisionLog,
+    executionLog,
     riskBars: {
       totalExposureUsd: state.follower.totalExposure,
       maxTotalExposureUsd: state.config.maxTotalExposure,
@@ -1150,6 +1253,8 @@ export function resetCopytradeState() {
   persistence.lastRefreshAt = null;
   persistence.lastRefreshOkAt = null;
   persistence.lastRefreshError = null;
+  runtimeLogs.decisionLog = [];
+  runtimeLogs.executionLog = [];
   refreshPromise = null;
   initializedFromStore = false;
 }

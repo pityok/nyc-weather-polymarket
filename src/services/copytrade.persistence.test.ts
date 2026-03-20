@@ -6,6 +6,7 @@ import {
   pauseCopytrade,
   refreshCopytradeState,
   resetCopytradeState,
+  setCopytradeMode,
   updateCopytradeConfig,
 } from "./copytrade.service.js";
 
@@ -148,4 +149,73 @@ describe("copytrade sqlite persistence", () => {
     expect(restored.leaderEvents[0]?.txHash).toBe("0xghi");
     expect(activityCall).toBe(2);
   });
+
+  it("persists a paper execution ledger across restart without duplicating identical staged orders", async () => {
+    const now = Math.floor(Date.now() / 1000);
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+
+      if (url.includes("/activity?")) {
+        return new Response(JSON.stringify([
+          {
+            name: "Lex-tang",
+            type: "TRADE",
+            conditionId: "cond-paper-1",
+            title: "Will the highest temperature in New York City be between 58-59°F on March 21?",
+            eventSlug: "highest-temperature-in-nyc-on-march-21-2026",
+            outcome: "Yes",
+            side: "BUY",
+            size: 90,
+            usdcSize: 27,
+            price: 0.3,
+            timestamp: now - 30,
+            transactionHash: "0xpaper-1",
+          },
+        ]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+
+      if (url.includes("/positions?")) {
+        return new Response(JSON.stringify([
+          {
+            conditionId: "cond-paper-1",
+            title: "Will the highest temperature in New York City be between 58-59°F on March 21?",
+            outcome: "Yes",
+            size: 0,
+            avgPrice: 0,
+            curPrice: 0.3,
+            currentValue: 0,
+            cashPnl: 0,
+            realizedPnl: 0,
+          },
+        ]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+
+      return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+    });
+
+    await updateCopytradeConfig({ quietWindowSec: 0 });
+    await setCopytradeMode({ mode: "paper" });
+    await refreshCopytradeState();
+    await refreshCopytradeState();
+
+    const snapshot = getCopytradeSnapshot();
+    expect(snapshot.executionLog).toHaveLength(1);
+    expect(snapshot.executionLog[0]).toMatchObject({
+      conditionId: "cond-paper-1",
+      action: "BUY",
+      status: "EXECUTING",
+      executionStatus: "EXECUTING",
+      executionPhase: "paper_order_staged",
+    });
+
+    resetCopytradeState();
+    await initializeCopytradeState({ force: true });
+
+    const restored = getCopytradeSnapshot();
+    expect(restored.mode).toBe("paper");
+    expect(restored.executionLog).toHaveLength(1);
+    expect(restored.executionLog[0]?.executionPhase).toBe("paper_order_staged");
+  });
+
 });
