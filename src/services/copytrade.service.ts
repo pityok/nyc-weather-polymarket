@@ -68,6 +68,11 @@ type AggregatedLeaderRow = {
   totalVolumeUsd: number;
 };
 
+type LeaderActivityFetchResult = {
+  items: RawActivity[];
+  incremental: boolean;
+};
+
 const initialState: CopytradeState = copytradeStateSchema.parse({
   mode: "dry-run",
   bot: {
@@ -639,9 +644,12 @@ async function fetchActivityPage(wallet: string, limit: number, offset: number) 
   return payload as RawActivity[];
 }
 
-async function fetchAllLeaderActivity(wallet: string) {
+async function fetchAllLeaderActivity(wallet: string): Promise<LeaderActivityFetchResult> {
   const rows: RawActivity[] = [];
   const seen = new Set<string>();
+  const persistedDedup = new Set(persistence.dedupKeys);
+  const cursorSec = persistence.activityCursorSec;
+  const canIncremental = cursorSec !== null && persistedDedup.size > 0 && state.positionRows.length > 0;
   const pageLimit = config.copytradeActivityPageLimit;
 
   for (let page = 0; page < config.copytradeActivityMaxPages; page += 1) {
@@ -650,6 +658,8 @@ async function fetchAllLeaderActivity(wallet: string) {
     if (payload.length === 0) {
       break;
     }
+
+    let shouldStop = false;
 
     for (const item of payload) {
       if (str(item.type).toUpperCase() !== "TRADE") {
@@ -661,16 +671,33 @@ async function fetchAllLeaderActivity(wallet: string) {
         continue;
       }
       seen.add(key);
+
+      const timestampSec = Math.trunc(num(item.timestamp));
+      if (canIncremental) {
+        if (persistedDedup.has(key)) {
+          shouldStop = true;
+          continue;
+        }
+
+        if (cursorSec !== null && timestampSec < cursorSec) {
+          shouldStop = true;
+          continue;
+        }
+      }
+
       rows.push(item);
     }
 
-    if (payload.length < pageLimit) {
+    if (payload.length < pageLimit || shouldStop) {
       break;
     }
   }
 
   rows.sort((a, b) => num(b.timestamp) - num(a.timestamp));
-  return rows;
+  return {
+    items: rows,
+    incremental: canIncremental,
+  };
 }
 
 async function fetchFollowerPositions(wallet: string) {
@@ -710,13 +737,29 @@ function buildFollowerMap(positions: RawPosition[]) {
   return map;
 }
 
-function aggregateLeaderRows(activity: RawActivity[], followerPositions: RawPosition[]) {
+function seedAggregatesFromPositionRows(rows: PositionRow[]) {
+  const nowSec = Math.floor(Date.now() / 1000);
   const aggregates = new Map<string, AggregatedLeaderRow>();
-  const followerMap = buildFollowerMap(followerPositions);
-  const now = new Date();
-  const nowSec = Math.floor(now.getTime() / 1000);
-  const timeMark = clockTime(now);
 
+  for (const row of rows) {
+    const key = positionKey(row.conditionId, row.outcome);
+    aggregates.set(key, {
+      conditionId: row.conditionId,
+      market: row.market,
+      outcome: row.outcome,
+      lexNetShares: row.lexNetShares,
+      lastPrice: row.midCents / 100,
+      avgTradePrice: row.avgEntryCents / 100,
+      lastTs: Math.max(0, nowSec - row.signalAgeSec),
+      partialFillCount: row.partialFillCount,
+      totalVolumeUsd: round(Math.max(row.depthUsd / 2.5, row.lexNetShares * row.midCents / 100), 2),
+    });
+  }
+
+  return aggregates;
+}
+
+function foldActivityIntoAggregates(aggregates: Map<string, AggregatedLeaderRow>, activity: RawActivity[]) {
   for (const item of activity) {
     const title = str(item.title);
     const eventSlug = str(item.eventSlug);
@@ -742,19 +785,19 @@ function aggregateLeaderRows(activity: RawActivity[], followerPositions: RawPosi
       outcome,
       lexNetShares: 0,
       lastPrice: 0,
-      avgTradePrice: 0,
+      avgTradePrice: price,
       lastTs: 0,
       partialFillCount: 0,
       totalVolumeUsd: 0,
     };
 
-    const prevAbsShares = existing.partialFillCount === 0 ? 0 : existing.totalVolumeUsd / Math.max(existing.avgTradePrice, 0.0001);
+    const prevVolumeUsd = existing.totalVolumeUsd;
     existing.market = shortWeatherTitle(title);
     existing.lexNetShares += sign * size;
-    existing.totalVolumeUsd += usdcSize;
+    existing.totalVolumeUsd = round(existing.totalVolumeUsd + usdcSize, 2);
     existing.partialFillCount += 1;
-    existing.avgTradePrice = (prevAbsShares + size) > 0
-      ? existing.totalVolumeUsd / (prevAbsShares + size)
+    existing.avgTradePrice = existing.totalVolumeUsd > 0
+      ? round((prevVolumeUsd + usdcSize) / Math.max((prevVolumeUsd / Math.max(existing.avgTradePrice, 0.0001)) + size, 0.0001), 6)
       : price;
 
     if (num(item.timestamp) >= existing.lastTs) {
@@ -765,7 +808,16 @@ function aggregateLeaderRows(activity: RawActivity[], followerPositions: RawPosi
     aggregates.set(key, existing);
   }
 
+  return aggregates;
+}
+
+function rowsFromAggregates(aggregates: Map<string, AggregatedLeaderRow>, followerPositions: RawPosition[]) {
+  const followerMap = buildFollowerMap(followerPositions);
+  const now = new Date();
+  const nowSec = Math.floor(now.getTime() / 1000);
+  const timeMark = clockTime(now);
   const rows: PositionRow[] = [];
+
   for (const aggregate of aggregates.values()) {
     const key = positionKey(aggregate.conditionId, aggregate.outcome);
     const follower = followerMap.get(key);
@@ -813,6 +865,15 @@ function aggregateLeaderRows(activity: RawActivity[], followerPositions: RawPosi
 
   rows.sort((a, b) => a.signalAgeSec - b.signalAgeSec || b.lexNetShares - a.lexNetShares);
   return rows;
+}
+
+function aggregateLeaderRows(activity: RawActivity[], followerPositions: RawPosition[], options?: { incremental?: boolean }) {
+  const aggregates = options?.incremental
+    ? seedAggregatesFromPositionRows(state.positionRows)
+    : new Map<string, AggregatedLeaderRow>();
+
+  foldActivityIntoAggregates(aggregates, activity);
+  return rowsFromAggregates(aggregates, followerPositions);
 }
 
 function buildLeaderEvents(activity: RawActivity[]) {
@@ -877,17 +938,34 @@ function trackingError(rows: CopytradeEvaluatedRow[]) {
   return round((totalDeltaNotional / totalTargetNotional) * 100, 2);
 }
 
-function applyLiveRefresh(activity: RawActivity[], followerPositions: RawPosition[]) {
+function mergeLeaderEvents(activity: RawActivity[], incremental: boolean) {
+  const freshEvents = buildLeaderEvents(activity);
+  if (!incremental) {
+    return freshEvents;
+  }
+
+  const merged = [...freshEvents, ...state.leaderEvents];
+  const seen = new Set<string>();
+  return merged.filter((event) => {
+    const key = `${event.txHash}|${event.group}|${event.action}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  }).slice(0, 20);
+}
+
+function applyLiveRefresh(activity: RawActivity[], followerPositions: RawPosition[], options?: { incremental?: boolean }) {
   const nowSec = Math.floor(Date.now() / 1000);
-  recordActivityMetadata(activity);
-  const rows = aggregateLeaderRows(activity, followerPositions);
-  const events = buildLeaderEvents(activity);
+  if (activity.length > 0) {
+    recordActivityMetadata(activity);
+  }
+  const incremental = Boolean(options?.incremental);
+  const rows = aggregateLeaderRows(activity, followerPositions, { incremental });
+  const events = mergeLeaderEvents(activity, incremental);
   const latestName = str(activity[0]?.name) || state.leader.name;
   const filteredWeatherActivity = activity.filter((item) => isWeatherMarket(str(item.title), str(item.eventSlug)));
-  const activity24h = activity.filter((item) => nowSec - Math.trunc(num(item.timestamp)) <= DAY_SECONDS).length;
-  const weatherActivity24h = filteredWeatherActivity
-    .filter((item) => nowSec - Math.trunc(num(item.timestamp)) <= DAY_SECONDS)
-    .length;
   const totalExposure = round(followerPositions.reduce((sum, position) => sum + num(position.currentValue), 0), 2);
   const realizedPnl = round(followerPositions.reduce((sum, position) => sum + num(position.realizedPnl), 0), 2);
   const unrealizedPnl = round(followerPositions.reduce((sum, position) => sum + num(position.cashPnl), 0), 2);
@@ -895,8 +973,12 @@ function applyLiveRefresh(activity: RawActivity[], followerPositions: RawPositio
   state.leader = {
     name: latestName,
     wallet: state.leader.wallet,
-    activity24h,
-    weatherActivity24h,
+    activity24h: incremental
+      ? state.leader.activity24h + activity.filter((item) => nowSec - Math.trunc(num(item.timestamp)) <= DAY_SECONDS).length
+      : activity.filter((item) => nowSec - Math.trunc(num(item.timestamp)) <= DAY_SECONDS).length,
+    weatherActivity24h: incremental
+      ? state.leader.weatherActivity24h + filteredWeatherActivity.filter((item) => nowSec - Math.trunc(num(item.timestamp)) <= DAY_SECONDS).length
+      : filteredWeatherActivity.filter((item) => nowSec - Math.trunc(num(item.timestamp)) <= DAY_SECONDS).length,
   };
   state.follower = {
     wallet: state.follower.wallet,
@@ -910,7 +992,7 @@ function applyLiveRefresh(activity: RawActivity[], followerPositions: RawPositio
 
   const evaluatedRows = getRows();
   state.stats = {
-    processed24h: weatherActivity24h,
+    processed24h: incremental ? state.stats.processed24h + filteredWeatherActivity.length : filteredWeatherActivity.length,
     skipped24h: evaluatedRows.filter((row) => row.action === "SKIP").length,
     held24h: evaluatedRows.filter((row) => row.action === "HOLD").length,
     trackingErrorPct: trackingError(evaluatedRows),
@@ -983,11 +1065,11 @@ export async function refreshCopytradeState() {
     state.bot.runtime = "loading";
 
     try {
-      const [activity, followerPositions] = await Promise.all([
+      const [activityResult, followerPositions] = await Promise.all([
         fetchAllLeaderActivity(state.leader.wallet),
         fetchFollowerPositions(state.follower.wallet),
       ]);
-      applyLiveRefresh(activity, followerPositions);
+      applyLiveRefresh(activityResult.items, followerPositions, { incremental: activityResult.incremental });
       persistence.refreshCount += 1;
       persistence.lastRefreshAt = refreshStartedAt;
       persistence.lastRefreshOkAt = state.bot.lastSyncAt;
