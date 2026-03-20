@@ -40,10 +40,35 @@ describe("GET /api/copytrade/rebalance-queue", () => {
       deltaShares: 5.1,
       action: "BUY",
       status: "READY",
+      executionPhase: "order_staged",
     });
 
     expect(res.body.items[1].status).toBe("WAITING");
     expect(res.body.items[1].reason).toContain("minTradeNotionalUsd");
+  });
+
+  it("prioritizes sells and queues buys when higher-priority rebalances consume budget", async () => {
+    await request(app)
+      .post("/api/copytrade/config")
+      .send({ minTradeNotionalUsd: 1, maxTotalExposure: 118.5 });
+
+    const res = await request(app).get("/api/copytrade/rebalance-queue");
+
+    expect(res.status).toBe(200);
+    expect(res.body.items[0]).toMatchObject({
+      market: "Miami 79-80F",
+      action: "SELL",
+      status: "READY",
+      executionPhase: "exit_order_staged",
+    });
+
+    const nycRow = res.body.items.find((item: { market: string }) => item.market === "NYC 61-62F");
+    expect(nycRow).toMatchObject({
+      action: "BUY",
+      status: "WAITING",
+      executionPhase: "queued_for_budget",
+    });
+    expect(nycRow.reason).toContain("Queued: free budget");
   });
 });
 

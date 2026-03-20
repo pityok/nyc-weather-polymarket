@@ -542,17 +542,25 @@ function lexNotional(row: PositionRow) {
   return round(row.lexNetShares * row.midCents / 100, 1);
 }
 
-function executionStatus(row: CopytradeEvaluatedRow) {
+function executionStatus(row: CopytradeEvaluatedRow): CopytradeEvaluatedRow["status"] {
   if (row.action === "BUY" || row.action === "SELL") {
-    return state.mode === "paper" || state.mode === "real" ? "EXECUTING" : "READY";
+    if ((state.mode === "paper" || state.mode === "real") && row.status === "READY") {
+      return "EXECUTING";
+    }
+    return row.status;
   }
   return row.status;
+}
+
+function plannerCapacity() {
+  return Math.max(1, Math.min(8, Math.floor(state.config.rebalanceWindowSec / 60)));
 }
 
 function evaluateRow(row: PositionRow): CopytradeEvaluatedRow {
   const myTargetShares = sharesTarget(row);
   const delta = deltaShares(row);
   const notional = deltaNotional(row);
+  const targetNotional = round(Math.abs(myTargetShares * row.midCents / 100), 2);
   const limitBreached = isLimitBreached();
   const quietGateCleared = row.quietWindowLeftSec === 0 || notional >= state.config.forceRebalanceNotionalUsd;
   const canBuy = !limitBreached;
@@ -588,6 +596,10 @@ function evaluateRow(row: PositionRow): CopytradeEvaluatedRow {
     action = "HOLD";
     status = "BLOCKED";
     reason = "LIMIT BREACHED: new BUY blocked, bot restricted to HOLD/SELL only.";
+  } else if (delta > 0 && targetNotional > state.config.maxMarketExposure) {
+    action = "BUY";
+    status = "BLOCKED";
+    reason = `Target market exposure $${targetNotional.toFixed(2)} exceeds maxMarketExposure $${state.config.maxMarketExposure.toFixed(2)}.`;
   } else if (Math.abs(delta) < 0.1) {
     action = "HOLD";
     status = "WAITING";
@@ -636,8 +648,118 @@ function evaluateRow(row: PositionRow): CopytradeEvaluatedRow {
   return evaluated;
 }
 
+function plannerPriority(row: CopytradeEvaluatedRow) {
+  if (row.status === "READY" && row.action === "SELL") {
+    return 0;
+  }
+  if (row.status === "READY" && row.action === "BUY") {
+    return 1;
+  }
+  if (row.status === "WAITING") {
+    return 2;
+  }
+  if (row.status === "BLOCKED") {
+    return 3;
+  }
+  return 4;
+}
+
+function plannerPhase(row: CopytradeEvaluatedRow) {
+  if (row.status === "BLOCKED") {
+    if (row.reason.includes("maxMarketExposure")) {
+      return "market_limit";
+    }
+    if (row.reason.includes("LIMIT BREACHED")) {
+      return "exposure_limit";
+    }
+    if (row.reason.includes("maxSignalAgeSec")) {
+      return "stale_signal";
+    }
+    if (row.reason.includes("skipWideMarket")) {
+      return "risk_block";
+    }
+    if (row.reason.includes("Execution paused")) {
+      return "execution_paused";
+    }
+    return "policy_block";
+  }
+
+  if (row.status === "WAITING") {
+    if (Math.abs(row.deltaShares) < 0.1) {
+      return "target_synced";
+    }
+    if (row.reason.includes("minTradeNotionalUsd")) {
+      return "below_min_trade_notional";
+    }
+    if (row.reason.includes("quiet window")) {
+      return "quiet_window";
+    }
+    return "queued";
+  }
+
+  return row.action === "SELL" ? "exit_order_staged" : "order_staged";
+}
+
+function planRebalanceQueue(rows: CopytradeEvaluatedRow[]): CopytradeEvaluatedRow[] {
+  const ordered = [...rows].sort((a, b) => (
+    plannerPriority(a) - plannerPriority(b)
+    || a.signalAgeSec - b.signalAgeSec
+    || b.deltaNotional - a.deltaNotional
+    || b.lexNetShares - a.lexNetShares
+  ));
+
+  let remainingBudget = freeBudget();
+  let staged = 0;
+  const capacity = plannerCapacity();
+
+  return ordered.map((row): CopytradeEvaluatedRow => {
+    const planned: CopytradeEvaluatedRow = {
+      ...row,
+      executionPhase: plannerPhase(row),
+      executionStatus: executionStatus(row),
+    };
+
+    if (row.status !== "READY" || (row.action !== "BUY" && row.action !== "SELL")) {
+      return planned;
+    }
+
+    if (staged >= capacity) {
+      return {
+        ...planned,
+        status: "WAITING" as const,
+        executionStatus: "WAITING" as const,
+        executionPhase: "queued_backlog",
+        reason: `Queued behind ${capacity} staged orders in the current rebalance window.`,
+      };
+    }
+
+    if (row.action === "BUY" && row.deltaNotional > remainingBudget) {
+      return {
+        ...planned,
+        status: "WAITING" as const,
+        executionStatus: "WAITING" as const,
+        executionPhase: "queued_for_budget",
+        reason: `Queued: free budget $${remainingBudget.toFixed(2)} is reserved by higher-priority rebalances.`,
+      };
+    }
+
+    staged += 1;
+    if (row.action === "BUY") {
+      remainingBudget = round(Math.max(0, remainingBudget - row.deltaNotional), 2);
+    } else {
+      remainingBudget = round(remainingBudget + row.deltaNotional, 2);
+    }
+
+    return {
+      ...planned,
+      executionPhase: row.action === "SELL" ? "exit_order_staged" : "order_staged",
+      executionStatus: executionStatus(row),
+    };
+  });
+}
+
 function getRows() {
-  return state.positionRows.map(evaluateRow);
+  return planRebalanceQueue(state.positionRows.map(evaluateRow));
 }
 
 function pendingRebalances(rows: CopytradeEvaluatedRow[]) {
@@ -1148,7 +1270,7 @@ export function getCopytradeSnapshot(): CopytradeSnapshot {
       maxTotalExposureUsd: state.config.maxTotalExposure,
       freeBudgetUsd: freeBudget(),
       pendingRebalances: pendingRebalances(rows),
-      pendingRebalancesCapacity: 8,
+      pendingRebalancesCapacity: plannerCapacity(),
       realizedPnlUsd: state.stats.realizedPnl,
       unrealizedPnlUsd: state.stats.unrealizedPnl,
       mtmPnlUsd: state.stats.mtmPnl,
