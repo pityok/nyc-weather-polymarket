@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import app from "../app.js";
-import { resetCopytradeState } from "../services/copytrade.service.js";
+import { clearCopytradePersistenceForTests, resetCopytradeState } from "../services/copytrade.service.js";
 
-afterEach(() => {
+afterEach(async () => {
   resetCopytradeState();
+  await clearCopytradePersistenceForTests();
   vi.restoreAllMocks();
 });
 

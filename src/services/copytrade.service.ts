@@ -1,5 +1,10 @@
 import { config } from "../config/index.js";
 import {
+  clearCopytradeStateStore,
+  loadCopytradeStateStore,
+  saveCopytradeStateStore,
+} from "../db/copytradeRepo.js";
+import {
   fetchWithRetry,
   RETRY_POLYMARKET,
 } from "../utils/fetchWithRetry.js";
@@ -240,7 +245,17 @@ const initialState: CopytradeState = copytradeStateSchema.parse({
 });
 
 const state: CopytradeState = structuredClone(initialState);
+const persistence = {
+  activityCursorSec: null as number | null,
+  dedupKeys: [] as string[],
+  refreshCount: 0,
+  lastRefreshAt: null as string | null,
+  lastRefreshOkAt: null as string | null,
+  lastRefreshError: null as string | null,
+};
 let refreshPromise: Promise<CopytradeSnapshot> | null = null;
+let initPromise: Promise<void> | null = null;
+let initializedFromStore = false;
 
 function round(value: number, digits = 2) {
   return Number(value.toFixed(digits));
@@ -277,6 +292,88 @@ function clockTime(date = new Date()) {
     second: "2-digit",
     hour12: false,
   }).format(date);
+}
+
+function recordActivityMetadata(activity: RawActivity[]) {
+  let newestTs: number | null = null;
+  const dedupKeys: string[] = [];
+  const seen = new Set<string>();
+
+  for (const item of activity) {
+    const key = activityKey(item);
+    if (!seen.has(key)) {
+      seen.add(key);
+      dedupKeys.push(key);
+    }
+
+    const ts = Math.trunc(num(item.timestamp));
+    if (ts > 0 && (newestTs === null || ts > newestTs)) {
+      newestTs = ts;
+    }
+
+    if (dedupKeys.length >= 500) {
+      break;
+    }
+  }
+
+  persistence.activityCursorSec = newestTs;
+  persistence.dedupKeys = dedupKeys;
+}
+
+async function persistCurrentState() {
+  const rows = getRows();
+  await saveCopytradeStateStore({
+    state: structuredClone(state),
+    activityCursorSec: persistence.activityCursorSec,
+    dedupKeys: [...persistence.dedupKeys],
+    decisionLog: rows,
+    executionLog: rows,
+    refreshCount: persistence.refreshCount,
+    lastRefreshAt: persistence.lastRefreshAt,
+    lastRefreshOkAt: persistence.lastRefreshOkAt,
+    lastRefreshError: persistence.lastRefreshError,
+  });
+}
+
+export async function initializeCopytradeState(options?: { force?: boolean }) {
+  if (initializedFromStore && !options?.force) {
+    return;
+  }
+
+  if (initPromise && !options?.force) {
+    return initPromise;
+  }
+
+  initPromise = (async () => {
+    const persisted = await loadCopytradeStateStore();
+
+    if (!persisted) {
+      initializedFromStore = true;
+      await persistCurrentState();
+      logWithTime("copytrade", "no persisted state found, seeded sqlite store from initial copytrade state");
+      return;
+    }
+
+    Object.assign(state, structuredClone(persisted.state));
+    persistence.activityCursorSec = persisted.activityCursorSec;
+    persistence.dedupKeys = [...persisted.dedupKeys];
+    persistence.refreshCount = persisted.refreshCount;
+    persistence.lastRefreshAt = persisted.lastRefreshAt;
+    persistence.lastRefreshOkAt = persisted.lastRefreshOkAt;
+    persistence.lastRefreshError = persisted.lastRefreshError;
+    initializedFromStore = true;
+    logWithTime("copytrade", `restored persisted state rows=${state.positionRows.length} updatedAt=${persisted.updatedAt}`);
+  })()
+    .catch((error) => {
+      initializedFromStore = false;
+      logWithTime("copytrade", `failed to restore persisted state error=${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    })
+    .finally(() => {
+      initPromise = null;
+    });
+
+  return initPromise;
 }
 
 function isWeatherMarket(title: string, eventSlug: string) {
@@ -782,6 +879,7 @@ function trackingError(rows: CopytradeEvaluatedRow[]) {
 
 function applyLiveRefresh(activity: RawActivity[], followerPositions: RawPosition[]) {
   const nowSec = Math.floor(Date.now() / 1000);
+  recordActivityMetadata(activity);
   const rows = aggregateLeaderRows(activity, followerPositions);
   const events = buildLeaderEvents(activity);
   const latestName = str(activity[0]?.name) || state.leader.name;
@@ -881,6 +979,7 @@ export async function refreshCopytradeState() {
 
   refreshPromise = (async () => {
     const previousRuntime = state.bot.runtime;
+    const refreshStartedAt = toIsoNow();
     state.bot.runtime = "loading";
 
     try {
@@ -889,11 +988,20 @@ export async function refreshCopytradeState() {
         fetchFollowerPositions(state.follower.wallet),
       ]);
       applyLiveRefresh(activity, followerPositions);
+      persistence.refreshCount += 1;
+      persistence.lastRefreshAt = refreshStartedAt;
+      persistence.lastRefreshOkAt = state.bot.lastSyncAt;
+      persistence.lastRefreshError = null;
+      await persistCurrentState();
       logWithTime("copytrade", `refresh ok leaderEvents=${state.leaderEvents.length} rows=${state.positionRows.length}`);
       return getCopytradeSnapshot();
     } catch (error) {
       state.bot.health = "error";
       state.bot.runtime = state.mode === "paused" ? "paused" : previousRuntime === "paused" ? "running" : previousRuntime;
+      persistence.refreshCount += 1;
+      persistence.lastRefreshAt = refreshStartedAt;
+      persistence.lastRefreshError = error instanceof Error ? error.message : String(error);
+      await persistCurrentState();
       logWithTime("copytrade", `refresh failed error=${error instanceof Error ? error.message : String(error)}`);
       throw error;
     } finally {
@@ -913,14 +1021,15 @@ export function getCopytradeState() {
   return structuredClone(state);
 }
 
-export function updateCopytradeConfig(input: unknown) {
+export async function updateCopytradeConfig(input: unknown) {
   const patch: CopytradeConfigPatch = copytradeConfigPatchSchema.parse(input);
   Object.assign(state.config, patch);
   touchSync();
+  await persistCurrentState();
   return getCopytradeSnapshot();
 }
 
-export function setCopytradeMode(input: unknown) {
+export async function setCopytradeMode(input: unknown) {
   const { mode } = copytradeModeBodySchema.parse(input);
   state.mode = mode;
   state.bot.runtime = mode === "paused" ? "paused" : "running";
@@ -928,29 +1037,44 @@ export function setCopytradeMode(input: unknown) {
     state.bot.pausedReason = null;
   }
   touchSync();
+  await persistCurrentState();
   return getCopytradeSnapshot();
 }
 
-export function pauseCopytrade(input: unknown) {
+export async function pauseCopytrade(input: unknown) {
   const { reason } = copytradePauseBodySchema.parse(input ?? {});
   state.mode = "paused";
   state.bot.runtime = "paused";
   state.bot.pausedReason = reason ?? "Paused from dashboard control";
   touchSync();
+  await persistCurrentState();
   return getCopytradeSnapshot();
 }
 
-export function resumeCopytrade() {
+export async function resumeCopytrade() {
   state.mode = "dry-run";
   state.bot.runtime = "running";
   state.bot.pausedReason = null;
   touchSync();
+  await persistCurrentState();
   return getCopytradeSnapshot();
 }
 
 export function resetCopytradeState() {
   Object.assign(state, structuredClone(initialState));
+  persistence.activityCursorSec = null;
+  persistence.dedupKeys = [];
+  persistence.refreshCount = 0;
+  persistence.lastRefreshAt = null;
+  persistence.lastRefreshOkAt = null;
+  persistence.lastRefreshError = null;
   refreshPromise = null;
+  initializedFromStore = false;
+}
+
+export async function clearCopytradePersistenceForTests() {
+  await clearCopytradeStateStore();
+  initializedFromStore = false;
 }
 
 export function getCopytradeMode(): CopytradeMode {

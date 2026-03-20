@@ -50,9 +50,9 @@ router.get("/api/copytrade/config", (_req, res) => {
   res.json(getCopytradeSnapshot().config);
 });
 
-router.post("/api/copytrade/config", (req, res, next) => {
+router.post("/api/copytrade/config", async (req, res, next) => {
   try {
-    const snapshot = updateCopytradeConfig(req.body);
+    const snapshot = await updateCopytradeConfig(req.body);
     res.json({ config: snapshot.config, updatedAt: snapshot.bot.lastSyncAt });
   } catch (error) {
     next(error);
@@ -100,27 +100,31 @@ router.get("/api/copytrade/execution-log", (_req, res) => {
   res.json({ items: getCopytradeSnapshot().executionLog });
 });
 
-router.post("/api/copytrade/mode", (req, res, next) => {
+router.post("/api/copytrade/mode", async (req, res, next) => {
   try {
-    const snapshot = setCopytradeMode(req.body);
+    const snapshot = await setCopytradeMode(req.body);
     res.json({ mode: snapshot.mode, runtime: snapshot.bot.runtime, pausedReason: snapshot.bot.pausedReason });
   } catch (error) {
     next(error);
   }
 });
 
-router.post("/api/copytrade/control/pause", (req, res, next) => {
+router.post("/api/copytrade/control/pause", async (req, res, next) => {
   try {
-    const snapshot = pauseCopytrade(req.body);
+    const snapshot = await pauseCopytrade(req.body);
     res.json({ mode: snapshot.mode, runtime: snapshot.bot.runtime, pausedReason: snapshot.bot.pausedReason });
   } catch (error) {
     next(error);
   }
 });
 
-router.post("/api/copytrade/control/resume", (_req, res) => {
-  const snapshot = resumeCopytrade();
-  res.json({ mode: snapshot.mode, runtime: snapshot.bot.runtime, pausedReason: snapshot.bot.pausedReason });
+router.post("/api/copytrade/control/resume", async (_req, res, next) => {
+  try {
+    const snapshot = await resumeCopytrade();
+    res.json({ mode: snapshot.mode, runtime: snapshot.bot.runtime, pausedReason: snapshot.bot.pausedReason });
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post("/api/copytrade/control/refresh", async (_req, res, next) => {
