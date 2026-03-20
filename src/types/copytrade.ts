@@ -53,6 +53,7 @@ export const copytradeBotSchema = z.object({
   pausedReason: z.string().nullable(),
   lastRefreshMode: copytradeRefreshModeSchema.nullable().optional(),
   lastFullResyncAt: z.string().datetime().nullable().optional(),
+  lastFullResyncRefreshCount: z.number().int().nonnegative().nullable().optional(),
 });
 export type CopytradeBot = z.infer<typeof copytradeBotSchema>;
 
@@ -162,11 +163,19 @@ export const copytradeRiskBarsSchema = z.object({
 });
 export type CopytradeRiskBars = z.infer<typeof copytradeRiskBarsSchema>;
 
+export const copytradeSyncHealthSchema = z.enum(["good", "warn", "bad"]);
+export type CopytradeSyncHealth = z.infer<typeof copytradeSyncHealthSchema>;
+
 export const copytradeSyncSchema = z.object({
   fullResyncEvery: z.number().int().positive(),
   nextFullResyncIn: z.number().int().positive(),
+  incrementalStreak: z.number().int().nonnegative(),
+  health: copytradeSyncHealthSchema,
+  degraded: z.boolean(),
+  note: z.string(),
   lastRefreshMode: copytradeRefreshModeSchema.nullable(),
   lastFullResyncAt: z.string().datetime().nullable(),
+  lastRefreshError: z.string().nullable(),
 });
 export type CopytradeSync = z.infer<typeof copytradeSyncSchema>;
 

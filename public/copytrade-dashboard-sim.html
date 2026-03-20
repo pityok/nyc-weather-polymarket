@@ -1319,8 +1319,13 @@
       sync: {
         fullResyncEvery: 12,
         nextFullResyncIn: 1,
+        incrementalStreak: 0,
+        health: "good",
+        degraded: false,
+        note: "Sync is healthy; 0 incremental refreshes since the last full reconcile.",
         lastRefreshMode: "full",
         lastFullResyncAt: "2026-03-19T14:20:00Z",
+        lastRefreshError: null,
       },
       leaderEvents: [
         {
@@ -1796,8 +1801,10 @@
       const errorSuffix = backendError ? ` · ${backendError.slice(0, 120)}` : "";
       const refreshMode = state.sync?.lastRefreshMode ?? "boot";
       const lastFull = shortTime(state.sync?.lastFullResyncAt);
-      document.getElementById("syncStatus").textContent = `Bot ${state.bot.health}, лаг ${Number(state.bot.lagSec || 0).toFixed(1)}с, последний sync ${shortTime(state.bot.lastSyncAt)}, refresh ${refreshMode}, last full ${lastFull} · ${backendLabel}${errorSuffix}`;
-      document.getElementById("syncReconcilePill").textContent = `every ${state.sync.fullResyncEvery} · next ${state.sync.nextFullResyncIn}`;
+      const syncHealth = state.sync?.health ?? "good";
+      const syncNote = state.sync?.note ? ` · ${state.sync.note}` : "";
+      document.getElementById("syncStatus").textContent = `Bot ${state.bot.health}, sync ${syncHealth}, лаг ${Number(state.bot.lagSec || 0).toFixed(1)}с, последний sync ${shortTime(state.bot.lastSyncAt)}, refresh ${refreshMode}, last full ${lastFull} · ${backendLabel}${syncNote}${errorSuffix}`;
+      document.getElementById("syncReconcilePill").textContent = `${syncHealth} · every ${state.sync.fullResyncEvery} · next ${state.sync.nextFullResyncIn}`;
       document.getElementById("heroPnl").textContent = `${fmtSignedMoney(state.stats.mtmPnl)} MTM`;
       document.getElementById("exposureBudget").textContent = `${fmtUsd(state.follower.totalExposure)} / ${fmtUsd(freeBudget())} free`;
       document.getElementById("exposureNote").textContent = isLimitBreached()

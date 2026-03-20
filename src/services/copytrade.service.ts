@@ -84,6 +84,7 @@ const initialState: CopytradeState = copytradeStateSchema.parse({
     pausedReason: null,
     lastRefreshMode: null,
     lastFullResyncAt: null,
+    lastFullResyncRefreshCount: null,
   },
   leader: {
     name: "Lex-tang",
@@ -324,12 +325,81 @@ function nextFullResyncIn() {
   return remainder === 0 ? cadence : cadence - remainder;
 }
 
+function incrementalStreak() {
+  if (persistence.refreshCount === 0) {
+    return 0;
+  }
+
+  const lastFullRefreshCount = state.bot.lastFullResyncRefreshCount;
+  if (lastFullRefreshCount === null || lastFullRefreshCount === undefined) {
+    return persistence.refreshCount;
+  }
+
+  return Math.max(0, persistence.refreshCount - lastFullRefreshCount);
+}
+
 function currentSyncState() {
+  const cadence = fullResyncEvery();
+  const nextIn = nextFullResyncIn();
+  const streak = incrementalStreak();
+  const lastRefreshMode = state.bot.lastRefreshMode ?? null;
+  const lastFullResyncAt = state.bot.lastFullResyncAt ?? null;
+  const lastRefreshError = persistence.lastRefreshError;
+
+  if (lastRefreshMode === "failed") {
+    return {
+      fullResyncEvery: cadence,
+      nextFullResyncIn: nextIn,
+      incrementalStreak: streak,
+      health: "bad" as const,
+      degraded: true,
+      note: "Last refresh failed; state may be stale until the next successful reconcile.",
+      lastRefreshMode,
+      lastFullResyncAt,
+      lastRefreshError,
+    };
+  }
+
+  if (persistence.refreshCount > 0 && !lastFullResyncAt) {
+    return {
+      fullResyncEvery: cadence,
+      nextFullResyncIn: nextIn,
+      incrementalStreak: streak,
+      health: "warn" as const,
+      degraded: true,
+      note: "Refreshes are running, but no successful full reconcile has been recorded yet.",
+      lastRefreshMode,
+      lastFullResyncAt,
+      lastRefreshError,
+    };
+  }
+
+  if (streak > 0 && nextIn <= 2) {
+    return {
+      fullResyncEvery: cadence,
+      nextFullResyncIn: nextIn,
+      incrementalStreak: streak,
+      health: "warn" as const,
+      degraded: true,
+      note: `Running ${streak} incremental refreshes since the last full reconcile; full rebuild due in ${nextIn}.`,
+      lastRefreshMode,
+      lastFullResyncAt,
+      lastRefreshError,
+    };
+  }
+
   return {
-    fullResyncEvery: fullResyncEvery(),
-    nextFullResyncIn: nextFullResyncIn(),
-    lastRefreshMode: state.bot.lastRefreshMode ?? null,
-    lastFullResyncAt: state.bot.lastFullResyncAt ?? null,
+    fullResyncEvery: cadence,
+    nextFullResyncIn: nextIn,
+    incrementalStreak: streak,
+    health: "good" as const,
+    degraded: false,
+    note: lastFullResyncAt
+      ? `Sync is healthy; ${streak} incremental refreshes since the last full reconcile.`
+      : "Waiting for the first live refresh.",
+    lastRefreshMode,
+    lastFullResyncAt,
+    lastRefreshError,
   };
 }
 
@@ -1331,6 +1401,7 @@ export async function refreshCopytradeState() {
       state.bot.lastRefreshMode = refreshMode;
       if (refreshMode !== "incremental") {
         state.bot.lastFullResyncAt = state.bot.lastSyncAt;
+        state.bot.lastFullResyncRefreshCount = persistence.refreshCount + 1;
       }
       persistence.refreshCount += 1;
       persistence.lastRefreshAt = refreshStartedAt;

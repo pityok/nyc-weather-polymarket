@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import app from "../app.js";
-import { clearCopytradePersistenceForTests, resetCopytradeState } from "../services/copytrade.service.js";
+import {
+  clearCopytradePersistenceForTests,
+  getCopytradeSnapshot,
+  refreshCopytradeState,
+  resetCopytradeState,
+} from "../services/copytrade.service.js";
 
 afterEach(async () => {
   resetCopytradeState();
@@ -26,9 +31,14 @@ describe("GET /api/copytrade/status", () => {
     expect(res.body.sync).toMatchObject({
       fullResyncEvery: 12,
       nextFullResyncIn: 1,
+      incrementalStreak: 0,
+      health: "good",
+      degraded: false,
       lastRefreshMode: null,
       lastFullResyncAt: null,
+      lastRefreshError: null,
     });
+    expect(res.body.sync.note).toContain("Waiting for the first live refresh");
   });
 });
 
@@ -45,8 +55,12 @@ describe("GET /api/copytrade/health", () => {
       sync: {
         fullResyncEvery: 12,
         nextFullResyncIn: 1,
+        incrementalStreak: 0,
+        health: "good",
+        degraded: false,
         lastRefreshMode: null,
         lastFullResyncAt: null,
+        lastRefreshError: null,
       },
     });
   });
@@ -218,8 +232,69 @@ describe("POST /api/copytrade/control/refresh", () => {
     expect(snapshot.body.sync).toMatchObject({
       fullResyncEvery: 12,
       nextFullResyncIn: 11,
+      incrementalStreak: 0,
+      health: "good",
+      degraded: false,
       lastRefreshMode: "full",
+      lastRefreshError: null,
     });
     expect(snapshot.body.sync.lastFullResyncAt).toBe(snapshot.body.bot.lastSyncAt);
+  });
+
+  it("marks sync as degraded when incremental refreshes run too long without a new full reconcile", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    let activityCall = 0;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+
+      if (url.includes("/activity?")) {
+        activityCall += 1;
+
+        if (activityCall === 1) {
+          return new Response(JSON.stringify([
+            {
+              name: "Lex-tang",
+              type: "TRADE",
+              conditionId: "cond-streak-1",
+              title: "Will the highest temperature in New York City be between 54-55°F on March 21?",
+              eventSlug: "highest-temperature-in-nyc-on-march-21-2026",
+              outcome: "Yes",
+              side: "BUY",
+              size: 120,
+              usdcSize: 30,
+              price: 0.25,
+              timestamp: now - 120,
+              transactionHash: "0xstreak-full",
+            },
+          ]), { status: 200, headers: { "content-type": "application/json" } });
+        }
+
+        return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+
+      if (url.includes("/positions?")) {
+        return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+
+      return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+    });
+
+    await refreshCopytradeState();
+    for (let i = 0; i < 9; i += 1) {
+      await refreshCopytradeState();
+    }
+
+    const snapshot = getCopytradeSnapshot();
+    expect(snapshot.sync).toMatchObject({
+      fullResyncEvery: 12,
+      nextFullResyncIn: 2,
+      incrementalStreak: 9,
+      health: "warn",
+      degraded: true,
+      lastRefreshMode: "incremental",
+      lastRefreshError: null,
+    });
+    expect(snapshot.sync.note).toContain("Running 9 incremental refreshes");
   });
 });
