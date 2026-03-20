@@ -830,6 +830,7 @@
           <div class="pill"><span class="pill-label">Scale</span><strong id="quickScale">0.10x</strong></div>
           <div class="pill"><span class="pill-label">Quiet window</span><strong id="quickQuiet">90s</strong></div>
           <div class="pill"><span class="pill-label">Max signal age</span><strong id="quickSignalAge">180s</strong></div>
+          <div class="pill"><span class="pill-label">Full reconcile</span><strong id="syncReconcilePill">every 12 · next 1</strong></div>
           <div class="pill"><span class="pill-label">P&L</span><strong id="heroPnl">+$24.8 MTM</strong></div>
         </div>
 
@@ -1315,6 +1316,12 @@
         unrealizedPnl: 18.6,
         mtmPnl: 24.8,
       },
+      sync: {
+        fullResyncEvery: 12,
+        nextFullResyncIn: 1,
+        lastRefreshMode: "full",
+        lastFullResyncAt: "2026-03-19T14:20:00Z",
+      },
       leaderEvents: [
         {
           market: "NYC 61-62F",
@@ -1453,8 +1460,9 @@
     }
 
     function shortTime(iso) {
+      if (!iso) return "—";
       const d = new Date(iso);
-      return d.toISOString().slice(11, 19) + "Z";
+      return Number.isNaN(d.getTime()) ? "—" : d.toISOString().slice(11, 19) + "Z";
     }
 
     function fmtSignedMoney(value, digits = 1) {
@@ -1677,6 +1685,10 @@
         ...state.stats,
         ...(snapshot.stats ?? {}),
       };
+      state.sync = {
+        ...state.sync,
+        ...(snapshot.sync ?? {}),
+      };
       state.leaderEvents = Array.isArray(snapshot.leaderEvents) ? snapshot.leaderEvents : state.leaderEvents;
       state.positionRows = Array.isArray(snapshot.positions)
         ? snapshot.positions
@@ -1782,7 +1794,10 @@
 
       const backendLabel = backendConnected ? "backend live" : "fallback sim";
       const errorSuffix = backendError ? ` · ${backendError.slice(0, 120)}` : "";
-      document.getElementById("syncStatus").textContent = `Bot ${state.bot.health}, лаг ${Number(state.bot.lagSec || 0).toFixed(1)}с, последний sync ${shortTime(state.bot.lastSyncAt)} · ${backendLabel}${errorSuffix}`;
+      const refreshMode = state.sync?.lastRefreshMode ?? "boot";
+      const lastFull = shortTime(state.sync?.lastFullResyncAt);
+      document.getElementById("syncStatus").textContent = `Bot ${state.bot.health}, лаг ${Number(state.bot.lagSec || 0).toFixed(1)}с, последний sync ${shortTime(state.bot.lastSyncAt)}, refresh ${refreshMode}, last full ${lastFull} · ${backendLabel}${errorSuffix}`;
+      document.getElementById("syncReconcilePill").textContent = `every ${state.sync.fullResyncEvery} · next ${state.sync.nextFullResyncIn}`;
       document.getElementById("heroPnl").textContent = `${fmtSignedMoney(state.stats.mtmPnl)} MTM`;
       document.getElementById("exposureBudget").textContent = `${fmtUsd(state.follower.totalExposure)} / ${fmtUsd(freeBudget())} free`;
       document.getElementById("exposureNote").textContent = isLimitBreached()

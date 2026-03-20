@@ -23,6 +23,32 @@ describe("GET /api/copytrade/status", () => {
     });
     expect(res.body.latestDecision.reason).toContain("deltaNotional");
     expect(res.body.follower.freeBudget).toBe(32);
+    expect(res.body.sync).toMatchObject({
+      fullResyncEvery: 12,
+      nextFullResyncIn: 1,
+      lastRefreshMode: null,
+      lastFullResyncAt: null,
+    });
+  });
+});
+
+describe("GET /api/copytrade/health", () => {
+  it("exposes full-reconcile cadence and last full reconcile metadata", async () => {
+    const res = await request(app).get("/api/copytrade/health");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      ok: true,
+      mode: "dry-run",
+      runtime: "running",
+      health: "ok",
+      sync: {
+        fullResyncEvery: 12,
+        nextFullResyncIn: 1,
+        lastRefreshMode: null,
+        lastFullResyncAt: null,
+      },
+    });
   });
 });
 
@@ -189,5 +215,11 @@ describe("POST /api/copytrade/control/refresh", () => {
       status: "READY",
     });
     expect(snapshot.body.leaderEvents[0].group).toBe("cond-live-1::YES");
+    expect(snapshot.body.sync).toMatchObject({
+      fullResyncEvery: 12,
+      nextFullResyncIn: 11,
+      lastRefreshMode: "full",
+    });
+    expect(snapshot.body.sync.lastFullResyncAt).toBe(snapshot.body.bot.lastSyncAt);
   });
 });

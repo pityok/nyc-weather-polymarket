@@ -42,12 +42,17 @@ export const copytradeConfigPatchSchema = copytradeConfigSchema
   });
 export type CopytradeConfigPatch = z.infer<typeof copytradeConfigPatchSchema>;
 
+export const copytradeRefreshModeSchema = z.enum(["full", "incremental", "full-reconcile", "failed"]);
+export type CopytradeRefreshMode = z.infer<typeof copytradeRefreshModeSchema>;
+
 export const copytradeBotSchema = z.object({
   runtime: copytradeRuntimeSchema,
   health: copytradeHealthSchema,
   lastSyncAt: z.string().datetime(),
   lagSec: z.number().nonnegative(),
   pausedReason: z.string().nullable(),
+  lastRefreshMode: copytradeRefreshModeSchema.nullable().optional(),
+  lastFullResyncAt: z.string().datetime().nullable().optional(),
 });
 export type CopytradeBot = z.infer<typeof copytradeBotSchema>;
 
@@ -157,6 +162,14 @@ export const copytradeRiskBarsSchema = z.object({
 });
 export type CopytradeRiskBars = z.infer<typeof copytradeRiskBarsSchema>;
 
+export const copytradeSyncSchema = z.object({
+  fullResyncEvery: z.number().int().positive(),
+  nextFullResyncIn: z.number().int().positive(),
+  lastRefreshMode: copytradeRefreshModeSchema.nullable(),
+  lastFullResyncAt: z.string().datetime().nullable(),
+});
+export type CopytradeSync = z.infer<typeof copytradeSyncSchema>;
+
 export const copytradeStateSchema = z.object({
   mode: copytradeModeSchema,
   bot: copytradeBotSchema,
@@ -204,4 +217,5 @@ export interface CopytradeSnapshot {
   decisionLog: CopytradeEvaluatedRow[];
   executionLog: CopytradeEvaluatedRow[];
   riskBars: CopytradeRiskBars;
+  sync: CopytradeSync;
 }

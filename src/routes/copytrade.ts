@@ -21,6 +21,7 @@ router.get("/api/copytrade/health", (_req, res) => {
     health: snapshot.bot.health,
     lastSyncAt: snapshot.bot.lastSyncAt,
     lagSec: snapshot.bot.lagSec,
+    sync: snapshot.sync,
   });
 });
 
@@ -35,6 +36,7 @@ router.get("/api/copytrade/status", (_req, res) => {
     latestDecision: snapshot.latestDecision,
     systemStates: snapshot.systemStates,
     riskBars: snapshot.riskBars,
+    sync: snapshot.sync,
   });
 });
 
